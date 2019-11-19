@@ -26,6 +26,8 @@
 
 .templates_sha: &template_sha 5fa4c5aae3775014b99364efc65531037c2e7368 # see https://docs.gitlab.com/ee/ci/yaml/#includefile
 
+.templates_sha: &template_sha ff90ddcf059bfce35bd5f9b89a59d5d0c912b458 # see https://docs.gitlab.com/ee/ci/yaml/#includefile
+
 include:
   # Alpine container builder template
   - project: 'wayland/ci-templates'
@@ -47,7 +49,6 @@ stages:
   - container_prep   # rebuild the container images if there is a change
   - build            # for actually building and testing things in a container
   - VM               # for running the test suite in a VM
-  - valgrind         # for running the test suite under valgrind in a VM
   - distro           # distribs test
   - deploy           # trigger wayland's website generation
   - container_clean  # clean up unused container images
@@ -63,8 +64,13 @@ variables:
   # See the documentation here:                                                 #
   # https://wayland.freedesktop.org/libinput/doc/latest/building_libinput.html  #
   ###############################################################################
+<<<<<<< HEAD
   FEDORA_RPMS:        'git gcc gcc-c++ pkgconf-pkg-config meson check-devel libudev-devel libevdev-devel doxygen graphviz python3-sphinx python3-recommonmark python3-sphinx_rtd_theme libwacom-devel cairo-devel   gtk3-devel   glib2-devel    mtdev-devel diffutils'
   FEDORA_QEMU_RPMS:   'git gcc gcc-c++ pkgconf-pkg-config meson check-devel libudev-devel libevdev-devel doxygen graphviz python3-sphinx python3-recommonmark python3-sphinx_rtd_theme libwacom-devel cairo-devel   gtk3-devel   glib2-devel    mtdev-devel diffutils valgrind'
+=======
+  FEDORA_RPMS:        'git gcc gcc-c++ pkgconf-pkg-config meson check-devel libudev-devel libevdev-devel doxygen graphviz python3-sphinx python3-recommonmark                          libwacom-devel cairo-devel   gtk3-devel   glib2-devel    mtdev-devel'
+  FEDORA_QEMU_RPMS:   'git gcc gcc-c++ pkgconf-pkg-config meson check-devel libudev-devel libevdev-devel doxygen graphviz python3-sphinx python3-recommonmark                          libwacom-devel cairo-devel   gtk3-devel   glib2-devel    mtdev-devel diffutils valgrind'
+>>>>>>> upstream/1.14-branch
   UBUNTU_CUSTOM_DEBS: 'git gcc g++     pkg-config         meson check       libudev-dev   libevdev-dev   doxygen graphviz python3-sphinx python3-recommonmark python3-sphinx-rtd-theme libwacom-dev   libcairo2-dev libgtk-3-dev libglib2.0-dev libmtdev-dev'
   ARCH_PKGS:          'git gcc         pkgconfig          meson check       libsystemd    libevdev       doxygen graphviz  python-sphinx  python-recommonmark python-sphinx_rtd_theme  libwacom                     gtk3                        mtdev      diffutils'
   FREEBSD_BUILD_PKGS: 'meson'
@@ -81,7 +87,11 @@ variables:
   ARCH_TAG: '2019-08-07.0'
   ALPINE_TAG: '2019-10-15.5'
   FREEBSD_TAG: '2019-08-07.0'
+<<<<<<< HEAD
   QEMU_TAG: 'qemu-vm-2019-10-25.0'
+=======
+  QEMU_TAG: 'qemu-vm-2019-10-04.0'
+>>>>>>> upstream/1.14-branch
 
   UBUNTU_EXEC: "bash .gitlab-ci/ubuntu_install.sh $UBUNTU_CUSTOM_DEBS"
 
@@ -162,6 +172,21 @@ fedora:30@qemu-prep:
     DISTRIB_VERSION: $FEDORA_VERSION
     TAG: $QEMU_TAG
   allow_failure: true
+  <<: *pull_upstream_or_rebuild
+
+fedora:30@qemu-prep:
+  extends: .fedora@qemu-build
+  stage: container_prep
+  tags:
+    - kvm
+  variables:
+    GIT_STRATEGY: none
+    FEDORA_VERSION: 30
+    FEDORA_TAG: $QEMU_TAG
+    FEDORA_RPMS: $FEDORA_QEMU_RPMS
+    DISTRIB_FLAVOR: fedora
+    DISTRIB_VERSION: $FEDORA_VERSION
+    TAG: $QEMU_TAG
   <<: *pull_upstream_or_rebuild
 
 fedora:30@container-prep:
@@ -413,11 +438,15 @@ freebsd:11.2@container-clean:
     exit 1 ;
   fi
 
+<<<<<<< HEAD
 # Run in a test suite. Special variables:
 # - SUITES: the meson test suites to run, or
 # - SUITE_NAMES: all elements will be expanded to libinput-test-suite-$value
 # Set one or the other, not both.
 .fedora:30@test-suite-vm:
+=======
+fedora:30@test-suite-vm:
+>>>>>>> upstream/1.14-branch
   stage: VM
   image: $QEMU_CONTAINER_IMAGE
   tags:
@@ -425,11 +454,14 @@ freebsd:11.2@container-clean:
   variables:
     FEDORA_VERSION: 30
     MESON_BUILDDIR: build_dir
+<<<<<<< HEAD
     # remove the global --no-suite=hardware
     MESON_TEST_ARGS: ''
   before_script:
     - if ! [[ -z $SUITE_NAMES ]]; then SUITES=$(echo $SUITE_NAMES | sed 's/\([^ ]*\)/libinput-test-suite-\1/g'); fi
     - echo "Testing $SUITES"
+=======
+>>>>>>> upstream/1.14-branch
   script:
     # start our vm, no args required
     - /app/start_vm.sh
@@ -441,8 +473,12 @@ freebsd:11.2@container-clean:
     - ssh localhost -p 5555 "cd $CI_PROJECT_NAME ; meson \"$MESON_BUILDDIR\" $MESON_ARGS"
     - ssh localhost -p 5555 "cd $CI_PROJECT_NAME ; meson configure \"$MESON_BUILDDIR\" "
     - ssh localhost -p 5555 "cd $CI_PROJECT_NAME ; ninja -C \"$MESON_BUILDDIR\" $NINJA_ARGS"
+<<<<<<< HEAD
     - echo "meson test -C \"$MESON_BUILDDIR\" $MESON_TEST_ARGS $SUITES --print-errorlogs"
     - ssh localhost -p 5555 "cd $CI_PROJECT_NAME ; meson test -C \"$MESON_BUILDDIR\" $MESON_TEST_ARGS --print-errorlogs $SUITES" && touch .success || true
+=======
+    - ssh localhost -p 5555 "cd $CI_PROJECT_NAME ; meson test -C \"$MESON_BUILDDIR\" $MESON_TEST_ARGS --print-errorlogs" && touch .success || true
+>>>>>>> upstream/1.14-branch
 
     # no matter the results of the tests, we want to fetch the logs
     - scp -P 5555 -r localhost:$CI_PROJECT_NAME/$MESON_BUILDDIR .
@@ -473,6 +509,7 @@ freebsd:11.2@container-clean:
   allow_failure: true
   needs: ['fedora:30@qemu-prep']
 
+<<<<<<< HEAD
 
 # in reverse order of duration to get the slowest ones started first
 fedora:30@vm-touchpad:
@@ -541,17 +578,32 @@ fedora:30@valgrind-pointer:
   extends: fedora:30@vm-pointer
   variables:
     MESON_TEST_ARGS: '--setup=valgrind'
+=======
+fedora:30@test-suite-vm-valgrind:
+  extends: fedora:30@test-suite-vm
+  variables:
+    MESON_TEST_ARGS: '--suite=valgrind --setup=valgrind'
+>>>>>>> upstream/1.14-branch
 
 .fedora-build@template:
   extends: .build@template
   image: $FEDORA_CONTAINER_IMAGE
 
+<<<<<<< HEAD
 fedora:31@default-build:
   stage: distro
   extends: .fedora-build@template
   variables:
     FEDORA_VERSION: 31
   needs: ['fedora:31@container-prep']
+=======
+fedora:29@default-build:
+  stage: distro
+  extends: .fedora-build@template
+  variables:
+    FEDORA_VERSION: 29
+  needs: ['fedora:29@container-prep']
+>>>>>>> upstream/1.14-branch
 
 fedora:30@default-build:
   stage: distro
@@ -660,6 +712,7 @@ fedora:30@valgrind:
     - dnf install -y valgrind
   needs: ['fedora:30@container-prep']
 
+<<<<<<< HEAD
 # Python checks, only run on Fedora
 
 fedora:30@usr-bin-env-python:
@@ -684,6 +737,8 @@ fedora:30@flake8:
     - flake8-3 --ignore=W501,E501,W504 $(git grep -l '^#!/usr/bin/env python3')
   needs: ['fedora:30@container-prep']
 
+=======
+>>>>>>> upstream/1.14-branch
 #
 # Ubuntu
 #
@@ -696,8 +751,13 @@ fedora:30@flake8:
 ubuntu:19.10@default-build:
   extends: .ubuntu@template
   variables:
+<<<<<<< HEAD
     UBUNTU_VERSION: "19.10"
   needs: ['ubuntu:19.10@container-prep']
+=======
+    UBUNTU_VERSION: "18.10"
+  needs: ['ubuntu:18.10@container-prep']
+>>>>>>> upstream/1.14-branch
 
 ubuntu:19.04@default-build:
   extends: .ubuntu@template
@@ -716,6 +776,7 @@ ubuntu:19.04@default-build:
 arch:rolling@default-build:
   extends: .arch@template
   needs: ['arch:rolling@container-prep']
+<<<<<<< HEAD
 
 #
 # Alpine
@@ -736,6 +797,8 @@ alpine:latest@default-build:
     # for any tcase_add_exit_test/tcase_add_test_raise_signal
     # but someone more invested in musl will have to figure that out.
     MESON_TEST_ARGS: ''
+=======
+>>>>>>> upstream/1.14-branch
 
 #
 # FreeBSD
