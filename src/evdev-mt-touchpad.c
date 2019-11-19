@@ -2905,13 +2905,16 @@ tp_init_accel(struct tp_dispatch *tp)
 	if (evdev_device_has_model_quirk(device, QUIRK_MODEL_LENOVO_X230) ||
 	    tp->device->model_flags & EVDEV_MODEL_LENOVO_X220_TOUCHPAD_FW81)
 		filter = create_pointer_accelerator_filter_lenovo_x230(dpi, use_v_avg);
+	/*
 	else if (libevdev_get_id_bustype(device->evdev) == BUS_BLUETOOTH)
 		filter = create_pointer_accelerator_filter_touchpad(dpi,
 								    ms2us(50),
 								    ms2us(10),
 								    use_v_avg);
+	*/
 	else
-		filter = create_pointer_accelerator_filter_touchpad(dpi, 0, 0, use_v_avg);
+		//filter = create_pointer_accelerator_filter_touchpad(dpi, 0, 0, use_v_avg);
+		filter = create_pointer_accelerator_filter_flat(device->dpi);
 
 	if (!filter)
 		return false;
