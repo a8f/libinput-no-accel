@@ -18,12 +18,12 @@ sha512sums=('SKIP')
 validpgpkeys=('SKIP')
 
 pkgver() {
-	cd libinput-no-touchpad-accel
+	cd libinput-no-accel
 	git describe --long | sed -r 's/([^-]*-g)/r\1/;s/-/./g'
 }
 
 build() {
-  arch-meson libinput-no-touchpad-accel build \
+  arch-meson libinput-no-accel build \
     -Dudev-dir=/usr/lib/udev \
     -Dtests=false \
     -Ddocumentation=false
