@@ -437,40 +437,40 @@ void litest_set_log_handler_bug(struct libinput *libinput);
 void
 _litest_add(const char *name,
 	    const char *funcname,
-	    void *func,
+	    const void *func,
 	    int64_t required_feature,
 	    int64_t excluded_feature);
 void
 _litest_add_ranged(const char *name,
 		   const char *funcname,
-		   void *func,
+		   const void *func,
 		   int64_t required,
 		   int64_t excluded,
 		   const struct range *range);
 void
 _litest_add_for_device(const char *name,
 		       const char *funcname,
-		       void *func,
+		       const void *func,
 		       enum litest_device_type type);
 void
 _litest_add_ranged_for_device(const char *name,
 			      const char *funcname,
-			      void *func,
+			      const void *func,
 			      enum litest_device_type type,
 			      const struct range *range);
 void
 _litest_add_no_device(const char *name,
 		      const char *funcname,
-		      void *func);
+		      const void *func);
 void
 _litest_add_ranged_no_device(const char *name,
 			     const char *funcname,
-			     void *func,
+			     const void *func,
 			     const struct range *range);
 void
 _litest_add_deviceless(const char *name,
 		       const char *funcname,
-		       void *func);
+		       const void *func);
 
 struct litest_device *
 litest_create_device(enum litest_device_type which);
@@ -751,6 +751,10 @@ struct libinput_event_tablet_pad *
 litest_is_pad_strip_event(struct libinput_event *event,
 			  unsigned int number,
 			  enum libinput_tablet_pad_strip_axis_source source);
+struct libinput_event_tablet_pad *
+litest_is_pad_key_event(struct libinput_event *event,
+			unsigned int key,
+			enum libinput_key_state state);
 
 struct libinput_event_switch *
 litest_is_switch_event(struct libinput_event *event,
@@ -796,6 +800,10 @@ void
 litest_assert_pad_button_event(struct libinput *li,
 				    unsigned int button,
 				    enum libinput_button_state state);
+void
+litest_assert_pad_key_event(struct libinput *li,
+			    unsigned int key,
+			    enum libinput_key_state state);
 struct libevdev_uinput *
 litest_create_uinput_device(const char *name,
 			    struct input_id *id,

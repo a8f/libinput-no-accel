@@ -29,7 +29,8 @@ import unittest
 import resource
 import sys
 import subprocess
-import time
+import tempfile
+from pathlib import Path
 
 
 def _disable_coredump():
@@ -64,7 +65,7 @@ class TestLibinputTool(unittest.TestCase):
         rc, stdout, stderr = self.run_command(args)
         # if we're running as user, we might fail the command but we should
         # never get rc 2 (invalid usage)
-        self.assertIn(rc, [0, 1])
+        self.assertIn(rc, [0, 1], msg=(stdout, stderr))
 
     def run_command_unrecognized_option(self, args):
         rc, stdout, stderr = self.run_command(args)
@@ -205,6 +206,17 @@ class TestDebugEvents(TestToolWithOptions, TestLibinputTool):
         self.run_command_unrecognized_option(['--foo'])
         self.run_command_unrecognized_option(['--version'])
 
+    def test_multiple_devices(self):
+        self.run_command_success(['--device', '/dev/input/event0', '/dev/input/event1'])
+        # same event path multiple times? meh, your problem
+        self.run_command_success(['--device', '/dev/input/event0', '/dev/input/event0'])
+        self.run_command_success(['/dev/input/event0', '/dev/input/event1'])
+
+    def test_too_many_devices(self):
+        # Too many arguments just bails with the usage message
+        rc, stdout, stderr = self.run_command(['/dev/input/event0'] * 61)
+        self.assertEqual(rc, 2, msg=(stdout, stderr))
+
 
 class TestDebugGUI(TestToolWithOptions, TestLibinputTool):
     subtool = 'debug-gui'
@@ -234,6 +246,43 @@ class TestDebugGUI(TestToolWithOptions, TestLibinputTool):
         self.run_command_unrecognized_option(['--banana'])
         self.run_command_unrecognized_option(['--foo'])
         self.run_command_unrecognized_option(['--version'])
+
+
+class TestRecord(TestLibinputTool):
+    subtool = 'record'
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.outfile = Path(self.tmpdir.name, 'record.out')
+
+    def tearDown(self):
+        self.tmpdir.cleanup()
+
+    def test_args(self):
+        self.run_command_success(['--help'])
+        self.run_command_success(['--show-keycodes'])
+        self.run_command_success(['--with-libinput'])
+
+    def test_multiple_deprecated(self):
+        # this arg is deprecated and a noop
+        self.run_command_success(['--multiple'])
+
+    def test_all(self):
+        self.run_command_success(['--all', '-o', self.outfile])
+
+    def test_autorestart(self):
+        self.run_command_success(['--autorestart=2'])
+
+    def test_outfile(self):
+        self.run_command_success(['-o', self.outfile])
+        self.run_command_success(['--output-file', self.outfile])
+        self.run_command_success(['--output-file={}'.format(self.outfile)])
+
+    def test_device_single(self):
+        self.run_command_success(['/dev/input/event0'])
+
+    def test_device_multiple(self):
+        self.run_command_success(['-o', self.outfile, '/dev/input/event0', '/dev/input/event1'])
 
 
 if __name__ == '__main__':

@@ -1144,6 +1144,8 @@ litest_utils_suite(void)
 	tcase_add_test(tc, list_test_append);
 	tcase_add_test(tc, strverscmp_test);
 
+	suite_add_tcase(s, tc);
+
 	return s;
 }
 
@@ -1154,7 +1156,7 @@ int main(int argc, char **argv)
 	SRunner *sr;
 
 	s = litest_utils_suite();
-        sr = srunner_create(s);
+	sr = srunner_create(s);
 
 	srunner_run_all(sr, CK_ENV);
 	nfailed = srunner_ntests_failed(sr);

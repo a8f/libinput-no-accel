@@ -82,6 +82,7 @@ static bool use_system_rules_quirks = false;
 const char *filter_test = NULL;
 const char *filter_device = NULL;
 const char *filter_group = NULL;
+const char *xml_prefix = NULL;
 static struct quirks_context *quirks_context;
 
 struct created_file {
@@ -242,7 +243,7 @@ struct test {
 	struct list node;
 	char *name;
 	char *devname;
-	void *func;
+	const void *func;
 	void *setup;
 	void *teardown;
 
@@ -308,7 +309,7 @@ litest_reload_udev_rules(void)
 static void
 litest_add_tcase_for_device(struct suite *suite,
 			    const char *funcname,
-			    void *func,
+			    const void *func,
 			    const struct litest_test_device *dev,
 			    const struct range *range)
 {
@@ -329,7 +330,7 @@ litest_add_tcase_for_device(struct suite *suite,
 
 static void
 litest_add_tcase_no_device(struct suite *suite,
-			   void *func,
+			   const void *func,
 			   const char *funcname,
 			   const struct range *range)
 {
@@ -355,7 +356,7 @@ litest_add_tcase_no_device(struct suite *suite,
 
 static void
 litest_add_tcase_deviceless(struct suite *suite,
-			    void *func,
+			    const void *func,
 			    const char *funcname,
 			    const struct range *range)
 {
@@ -421,7 +422,7 @@ get_suite(const char *name)
 static void
 litest_add_tcase(const char *suite_name,
 		 const char *funcname,
-		 void *func,
+		 const void *func,
 		 int64_t required,
 		 int64_t excluded,
 		 const struct range *range)
@@ -505,7 +506,7 @@ litest_add_tcase(const char *suite_name,
 }
 
 void
-_litest_add_no_device(const char *name, const char *funcname, void *func)
+_litest_add_no_device(const char *name, const char *funcname, const void *func)
 {
 	_litest_add(name, funcname, func, LITEST_DISABLE_DEVICE, LITEST_DISABLE_DEVICE);
 }
@@ -513,7 +514,7 @@ _litest_add_no_device(const char *name, const char *funcname, void *func)
 void
 _litest_add_ranged_no_device(const char *name,
 			     const char *funcname,
-			     void *func,
+			     const void *func,
 			     const struct range *range)
 {
 	_litest_add_ranged(name,
@@ -527,7 +528,7 @@ _litest_add_ranged_no_device(const char *name,
 void
 _litest_add_deviceless(const char *name,
 		       const char *funcname,
-		       void *func)
+		       const void *func)
 {
 	_litest_add_ranged(name,
 			   funcname,
@@ -540,7 +541,7 @@ _litest_add_deviceless(const char *name,
 void
 _litest_add(const char *name,
 	    const char *funcname,
-	    void *func,
+	    const void *func,
 	    int64_t required,
 	    int64_t excluded)
 {
@@ -555,7 +556,7 @@ _litest_add(const char *name,
 void
 _litest_add_ranged(const char *name,
 		   const char *funcname,
-		   void *func,
+		   const void *func,
 		   int64_t required,
 		   int64_t excluded,
 		   const struct range *range)
@@ -566,7 +567,7 @@ _litest_add_ranged(const char *name,
 void
 _litest_add_for_device(const char *name,
 		       const char *funcname,
-		       void *func,
+		       const void *func,
 		       enum litest_device_type type)
 {
 	_litest_add_ranged_for_device(name, funcname, func, type, NULL);
@@ -575,7 +576,7 @@ _litest_add_for_device(const char *name,
 void
 _litest_add_ranged_for_device(const char *name,
 			      const char *funcname,
-			      void *func,
+			      const void *func,
 			      enum litest_device_type type,
 			      const struct range *range)
 {
@@ -831,6 +832,68 @@ quirk_log_handler(struct libinput *unused,
 	vfprintf(stderr, format, args);
 }
 
+static void
+litest_export_xml(SRunner *sr, const char *xml_prefix)
+{
+	TestResult **results;
+	int nresults, nfailed;
+	char *filename;
+	int fd;
+
+	/* This is the minimum-effort implementation here because its only
+	 * real purpose is to make test logs look pretty in the gitlab CI.
+	 *
+	 * Which means:
+	 * - there's no filename validation, if you supply a filename that
+	 *   mkstemps doesn't like, things go boom.
+	 * - every fork writes out a separate junit.xml file. gitlab is better
+	 *   at collecting lots of files than I am at writing code to collect
+	 *   this across forks to write out only one file.
+	 * - most of the content is pretty useless because libcheck only gives
+	 *   us minimal information. the libcheck XML file has more info like
+	 *   the duration of each test but it's more complicated to extract
+	 *   and we don't need it for now.
+	 */
+	filename = safe_strdup(xml_prefix);
+	fd = mkstemps(filename, 4);
+
+	results = srunner_results(sr);
+	nresults = srunner_ntests_run(sr);
+	nfailed = srunner_ntests_failed(sr);
+
+	dprintf(fd, "<?xml version=\"1.0\"?>\n");
+	dprintf(fd, "<testsuites id=\"%s\" tests=\"%d\" failures=\"%d\">\n",
+		filename,
+		nresults,
+		nfailed);
+	dprintf(fd, "  <testsuite>\n");
+	for (int i = 0; i < nresults; i++) {
+		TestResult *r = results[i];
+
+		dprintf(fd, "    <testcase id=\"%s\" name=\"%s\" %s>\n",
+			tr_tcname(r),
+			tr_tcname(r),
+			tr_rtype(r) == CK_PASS ? "/" : "");
+		if (tr_rtype(r) != CK_PASS) {
+			dprintf(fd, "      <failure message=\"%s:%d\">\n",
+				tr_lfile(r),
+				tr_lno(r));
+			dprintf(fd, "        %s:%d\n", tr_lfile(r), tr_lno(r));
+			dprintf(fd, "        %s\n", tr_tcname(r));
+			dprintf(fd, "\n");
+			dprintf(fd, "        %s\n", tr_msg(r));
+			dprintf(fd, "      </failure>\n");
+			dprintf(fd, "    </testcase>\n");
+		}
+	}
+	dprintf(fd, "  </testsuite>\n");
+	dprintf(fd, "</testsuites>\n");
+
+	free(results);
+	close(fd);
+	free(filename);
+}
+
 static int
 litest_run_suite(struct list *tests, int which, int max, int error_fd)
 {
@@ -928,6 +991,10 @@ litest_run_suite(struct list *tests, int which, int max, int error_fd)
 		goto out;
 
 	srunner_run_all(sr, CK_ENV);
+	if (xml_prefix)
+		litest_export_xml(sr, xml_prefix);
+
+
 	failed = srunner_ntests_failed(sr);
 	if (failed) {
 		TestResult **trs;
@@ -2908,6 +2975,9 @@ litest_event_type_str(enum libinput_event_type type)
 	case LIBINPUT_EVENT_TABLET_PAD_STRIP:
 		str = "TABLET PAD STRIP";
 		break;
+	case LIBINPUT_EVENT_TABLET_PAD_KEY:
+		str = "TABLET PAD KEY";
+		break;
 	case LIBINPUT_EVENT_SWITCH_TOGGLE:
 		str = "SWITCH TOGGLE";
 		break;
@@ -3533,6 +3603,27 @@ litest_is_pad_strip_event(struct libinput_event *event,
 	return p;
 }
 
+struct libinput_event_tablet_pad *
+litest_is_pad_key_event(struct libinput_event *event,
+			unsigned int key,
+			enum libinput_key_state state)
+{
+	struct libinput_event_tablet_pad *p;
+	enum libinput_event_type type = LIBINPUT_EVENT_TABLET_PAD_KEY;
+
+	litest_assert(event != NULL);
+	litest_assert_event_type(event, type);
+
+	p = libinput_event_get_tablet_pad_event(event);
+	litest_assert(p != NULL);
+
+	litest_assert_int_eq(libinput_event_tablet_pad_get_key(p), key);
+	litest_assert_int_eq(libinput_event_tablet_pad_get_key_state(p),
+			     state);
+
+	return p;
+}
+
 struct libinput_event_switch *
 litest_is_switch_event(struct libinput_event *event,
 		       enum libinput_switch sw,
@@ -3564,6 +3655,21 @@ litest_assert_pad_button_event(struct libinput *li,
 	event = libinput_get_event(li);
 
 	pev = litest_is_pad_button_event(event, button, state);
+	libinput_event_destroy(libinput_event_tablet_pad_get_base_event(pev));
+}
+
+void
+litest_assert_pad_key_event(struct libinput *li,
+			    unsigned int key,
+			    enum libinput_key_state state)
+{
+	struct libinput_event *event;
+	struct libinput_event_tablet_pad *pev;
+
+	litest_wait_for_event(li);
+	event = libinput_get_event(li);
+
+	pev = litest_is_pad_key_event(event, key, state);
 	libinput_event_destroy(libinput_event_tablet_pad_get_base_event(pev));
 }
 
@@ -4050,6 +4156,7 @@ litest_parse_argv(int argc, char **argv)
 		OPT_FILTER_DEVICE,
 		OPT_FILTER_GROUP,
 		OPT_FILTER_DEVICELESS,
+		OPT_XML_PREFIX,
 		OPT_JOBS,
 		OPT_LIST,
 		OPT_VERBOSE,
@@ -4059,6 +4166,7 @@ litest_parse_argv(int argc, char **argv)
 		{ "filter-device", 1, 0, OPT_FILTER_DEVICE },
 		{ "filter-group", 1, 0, OPT_FILTER_GROUP },
 		{ "filter-deviceless", 0, 0, OPT_FILTER_DEVICELESS },
+		{ "xml-output", 1, 0, OPT_XML_PREFIX },
 		{ "jobs", 1, 0, OPT_JOBS },
 		{ "list", 0, 0, OPT_LIST },
 		{ "verbose", 0, 0, OPT_VERBOSE },
@@ -4111,6 +4219,10 @@ litest_parse_argv(int argc, char **argv)
 			       "          Glob to filter on test groups\n"
 			       "    --filter-deviceless=.... \n"
 			       "          Glob to filter on tests that do not create test devices\n"
+			       "    --xml-output=/path/to/file-XXXXXXX.xml\n"
+			       "          Write test output in libcheck's XML format\n"
+			       "          to the given files. The file must match the format\n"
+			       "          prefix-XXXXXX.xml and only the prefix is your choice.\n"
 			       "    --verbose\n"
 			       "          Enable verbose output\n"
 			       "    --jobs 8\n"
@@ -4135,6 +4247,9 @@ litest_parse_argv(int argc, char **argv)
 			break;
 		case OPT_FILTER_GROUP:
 			filter_group = optarg;
+			break;
+		case OPT_XML_PREFIX:
+			xml_prefix = optarg;
 			break;
 		case 'j':
 		case OPT_JOBS:
