@@ -1,5 +1,5 @@
 pkgname=libinput
-pkgver=1.15
+pkgver=1.15.0.r35.g8dc88a88
 pkgrel=1
 pkgdesc="Input device management and event handling library"
 url="https://www.freedesktop.org/wiki/Software/libinput/"
@@ -13,7 +13,7 @@ makedepends=('gtk3' 'meson') # 'doxygen' 'python-sphinx' 'python-recommonmark'
 optdepends=('gtk3: libinput debug-gui'
             'python-pyudev: libinput measure'
             'python-evdev: libinput measure')
-source=(git+https://github.com/git-uname/libinput-no-accel)
+source=(git+https://github.com/a8f/libinput-no-accel)
 sha512sums=('SKIP')
 validpgpkeys=('SKIP')
 
