@@ -1,5 +1,5 @@
 project('libinput', 'c',
-	version : '1.15.0',
+	version : '1.15.2',
 	license : 'MIT/Expat',
 	default_options : [ 'c_std=gnu99', 'warning_level=2' ],
 	meson_version : '>= 0.41.0')
@@ -767,9 +767,11 @@ if get_option('tests')
 	litest_sources = [
 		'test/litest.h',
 		'test/litest-int.h',
+		'test/litest-device-absinfo-override.c',
 		'test/litest-device-acer-hawaii-keyboard.c',
 		'test/litest-device-acer-hawaii-touchpad.c',
 		'test/litest-device-aiptek-tablet.c',
+		'test/litest-device-alps-3fg.c',
 		'test/litest-device-alps-semi-mt.c',
 		'test/litest-device-alps-dualpoint.c',
 		'test/litest-device-anker-mouse-kbd.c',
@@ -784,6 +786,7 @@ if get_option('tests')
 		'test/litest-device-dell-canvas-totem.c',
 		'test/litest-device-dell-canvas-totem-touch.c',
 		'test/litest-device-elantech-touchpad.c',
+		'test/litest-device-elan-tablet.c',
 		'test/litest-device-generic-singletouch.c',
 		'test/litest-device-gpio-keys.c',
 		'test/litest-device-huion-pentablet.c',

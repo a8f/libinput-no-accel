@@ -66,7 +66,6 @@
 #include <linux/kd.h>
 
 #define UDEV_RULES_D "/run/udev/rules.d"
-#define UDEV_RULE_PREFIX "99-litest-"
 #define UDEV_FUZZ_OVERRIDE_RULE_FILE UDEV_RULES_D \
 	"/91-litest-fuzz-override-REMOVEME-XXXXXX.rules"
 #define UDEV_TEST_DEVICE_RULE_FILE UDEV_RULES_D \
@@ -693,6 +692,7 @@ litest_init_device_udev_rules(struct litest_test_device *dev, FILE *f)
 {
 	const struct key_value_str *kv;
 	static int count;
+	bool need_keyboard_builtin = false;
 
 	if (dev->udev_properties[0].key == NULL)
 		return;
@@ -708,10 +708,27 @@ litest_init_device_udev_rules(struct litest_test_device *dev, FILE *f)
 	kv = dev->udev_properties;
 	while (kv->key) {
 		fprintf(f, ", \\\n\tENV{%s}=\"%s\"", kv->key, kv->value);
+		if (strneq(kv->key, "EVDEV_ABS_", 10))
+			need_keyboard_builtin = true;
 		kv++;
 	}
-
 	fprintf(f, "\n");
+
+	/* Special case: the udev keyboard builtin is only run for hwdb
+	 * matches but we don't set any up in litest. So instead scan the
+	 * device's udev properties for any EVDEV_ABS properties and where
+	 * they exist, force a (re-)run of the keyboard builtin to set up
+	 * the evdev device correctly.
+	 * This needs to be done as separate rule apparently, otherwise the
+	 * ENV variables aren't set yet by the time the builtin runs.
+	 */
+	if (need_keyboard_builtin) {
+		fprintf(f, ""
+			"ATTRS{name}==\"litest %s*\","
+			" IMPORT{builtin}+=\"keyboard\"\n",
+			dev->name);
+	}
+
 	fprintf(f, "LABEL=\"rule%d_end\"\n\n", count);;
 }
 
@@ -726,9 +743,8 @@ litest_init_all_device_udev_rules(struct list *created_files)
 	int fd;
 
 	rc = xasprintf(&path,
-		      "%s/%s-XXXXXX.rules",
-		      UDEV_RULES_D,
-		      UDEV_RULE_PREFIX);
+		      "%s/99-litest-XXXXXX.rules",
+		      UDEV_RULES_D);
 	litest_assert_int_gt(rc, 0);
 
 	fd = mkstemps(path, 6);
@@ -1954,10 +1970,11 @@ slot_start(struct litest_device *d,
 
 	send_btntool(d, !touching);
 
-	if (d->interface->touch_down) {
-		d->interface->touch_down(d, slot, x, y);
-		return;
-	}
+	/* If the test device overrides touch_down and says it didn't
+	 * handle the event, let's continue normally */
+	if (d->interface->touch_down &&
+	    d->interface->touch_down(d, slot, x, y))
+	    return;
 
 	for (ev = d->interface->touch_down_events;
 	     ev && (int16_t)ev->type != -1 && (int16_t)ev->code != -1;
@@ -1991,10 +2008,9 @@ slot_move(struct litest_device *d,
 {
 	struct input_event *ev;
 
-	if (d->interface->touch_move) {
-		d->interface->touch_move(d, slot, x, y);
+	if (d->interface->touch_move &&
+	    d->interface->touch_move(d, slot, x, y))
 		return;
-	}
 
 	for (ev = d->interface->touch_move_events;
 	     ev && (int16_t)ev->type != -1 && (int16_t)ev->code != -1;
@@ -2036,8 +2052,8 @@ touch_up(struct litest_device *d, unsigned int slot)
 
 	send_btntool(d, false);
 
-	if (d->interface->touch_up) {
-		d->interface->touch_up(d, slot);
+	if (d->interface->touch_up &&
+	    d->interface->touch_up(d, slot)) {
 		return;
 	} else if (d->interface->touch_up_events) {
 		ev = d->interface->touch_up_events;
@@ -3505,21 +3521,30 @@ litest_assert_tablet_button_event(struct libinput *li, unsigned int button,
 	libinput_event_destroy(event);
 }
 
-void litest_assert_tablet_proximity_event(struct libinput *li,
-					  enum libinput_tablet_tool_proximity_state state)
+
+struct libinput_event_tablet_tool *
+litest_is_proximity_event(struct libinput_event *event,
+			  enum libinput_tablet_tool_proximity_state state)
 {
-	struct libinput_event *event;
 	struct libinput_event_tablet_tool *tev;
 	enum libinput_event_type type = LIBINPUT_EVENT_TABLET_TOOL_PROXIMITY;
-
-	litest_wait_for_event(li);
-	event = libinput_get_event(li);
 
 	litest_assert_notnull(event);
 	litest_assert_event_type(event, type);
 	tev = libinput_event_get_tablet_tool_event(event);
 	litest_assert_int_eq(libinput_event_tablet_tool_get_proximity_state(tev),
 			     state);
+	return tev;
+}
+
+void litest_assert_tablet_proximity_event(struct libinput *li,
+					  enum libinput_tablet_tool_proximity_state state)
+{
+	struct libinput_event *event;
+
+	litest_wait_for_event(li);
+	event = libinput_get_event(li);
+	litest_is_proximity_event(event, state);
 	libinput_event_destroy(event);
 }
 
