@@ -1157,34 +1157,12 @@ START_TEST(touchpad_edge_scroll_into_area)
 END_TEST
 
 static bool
-touchpad_has_palm_detect_size(struct litest_device *dev)
-{
-	double width, height;
-	unsigned int vendor;
-	unsigned int bustype;
-	int rc;
-
-	vendor = libinput_device_get_id_vendor(dev->libinput_device);
-	bustype = libevdev_get_id_bustype(dev->evdev);
-	if (vendor == VENDOR_ID_WACOM)
-		return 0;
-	if (bustype == BUS_BLUETOOTH)
-		return 0;
-	if (vendor == VENDOR_ID_APPLE)
-		return 1;
-
-	rc = libinput_device_get_size(dev->libinput_device, &width, &height);
-
-	return rc == 0 && width >= 70;
-}
-
-static bool
 touchpad_has_top_palm_detect_size(struct litest_device *dev)
 {
 	double width, height;
 	int rc;
 
-	if (!touchpad_has_palm_detect_size(dev))
+	if (!litest_has_palm_detect_size(dev))
 		return false;
 
 	rc = libinput_device_get_size(dev->libinput_device, &width, &height);
@@ -1197,7 +1175,7 @@ START_TEST(touchpad_palm_detect_at_edge)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev) ||
+	if (!litest_has_palm_detect_size(dev) ||
 	    !litest_has_2fg_scroll(dev))
 		return;
 
@@ -1246,7 +1224,7 @@ START_TEST(touchpad_no_palm_detect_at_edge_for_edge_scrolling)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev))
+	if (!litest_has_palm_detect_size(dev))
 		return;
 
 	litest_enable_edge_scroll(dev);
@@ -1266,7 +1244,7 @@ START_TEST(touchpad_palm_detect_at_bottom_corners)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev) ||
+	if (!litest_has_palm_detect_size(dev) ||
 	    !litest_has_2fg_scroll(dev))
 		return;
 
@@ -1295,7 +1273,7 @@ START_TEST(touchpad_palm_detect_at_top_corners)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev) ||
+	if (!litest_has_palm_detect_size(dev) ||
 	    !litest_has_2fg_scroll(dev))
 		return;
 
@@ -1326,7 +1304,7 @@ START_TEST(touchpad_palm_detect_palm_stays_palm)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev) ||
+	if (!litest_has_palm_detect_size(dev) ||
 	    !litest_has_2fg_scroll(dev))
 		return;
 
@@ -1368,7 +1346,7 @@ START_TEST(touchpad_palm_detect_palm_becomes_pointer)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev) ||
+	if (!litest_has_palm_detect_size(dev) ||
 	    !litest_has_2fg_scroll(dev))
 		return;
 
@@ -1419,7 +1397,7 @@ START_TEST(touchpad_palm_detect_no_palm_moving_into_edges)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev))
+	if (!litest_has_palm_detect_size(dev))
 		return;
 
 	litest_disable_tap(dev->libinput_device);
@@ -1498,7 +1476,7 @@ START_TEST(touchpad_palm_detect_tap_hardbuttons)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev))
+	if (!litest_has_palm_detect_size(dev))
 		return;
 
 	litest_enable_tap(dev->libinput_device);
@@ -1540,7 +1518,7 @@ START_TEST(touchpad_palm_detect_tap_softbuttons)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev))
+	if (!litest_has_palm_detect_size(dev))
 		return;
 
 	litest_enable_tap(dev->libinput_device);
@@ -1595,7 +1573,7 @@ START_TEST(touchpad_palm_detect_tap_clickfinger)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev))
+	if (!litest_has_palm_detect_size(dev))
 		return;
 
 	litest_enable_tap(dev->libinput_device);
@@ -1638,7 +1616,7 @@ START_TEST(touchpad_no_palm_detect_2fg_scroll)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev) ||
+	if (!litest_has_palm_detect_size(dev) ||
 	    !litest_has_2fg_scroll(dev))
 		return;
 
@@ -1665,7 +1643,7 @@ START_TEST(touchpad_palm_detect_both_edges)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 
-	if (!touchpad_has_palm_detect_size(dev) ||
+	if (!litest_has_palm_detect_size(dev) ||
 	    !litest_has_2fg_scroll(dev))
 		return;
 
@@ -2060,7 +2038,7 @@ START_TEST(touchpad_palm_detect_pressure_after_edge)
 	};
 
 	if (!touchpad_has_palm_pressure(dev) ||
-	    !touchpad_has_palm_detect_size(dev) ||
+	    !litest_has_palm_detect_size(dev) ||
 	    !litest_has_2fg_scroll(dev))
 		return;
 
@@ -3568,7 +3546,7 @@ START_TEST(touchpad_initial_state)
 		libinput_event_destroy(ev2);
 	}
 
-	libinput_unref(libinput2);
+	litest_destroy_context(libinput2);
 }
 END_TEST
 
@@ -3622,7 +3600,7 @@ START_TEST(touchpad_fingers_down_before_init)
 
 	litest_assert_empty_queue(li);
 
-	libinput_unref(li);
+	litest_destroy_context(li);
 }
 END_TEST
 
@@ -5635,7 +5613,7 @@ START_TEST(touchpad_finger_always_down)
 
 	litest_assert_only_typed_events(li, LIBINPUT_EVENT_POINTER_MOTION);
 
-	libinput_unref(li);
+	litest_destroy_context(li);
 }
 END_TEST
 
@@ -6436,7 +6414,7 @@ START_TEST(touchpad_palm_detect_touch_size_after_edge)
 
 	if (!touchpad_has_touch_size(dev) ||
 	    litest_touchpad_is_external(dev) ||
-	    !touchpad_has_palm_detect_size(dev) ||
+	    !litest_has_palm_detect_size(dev) ||
 	    !litest_has_2fg_scroll(dev))
 		return;
 
@@ -6672,6 +6650,9 @@ START_TEST(touchpad_suspend_abba)
 	tabletmode = litest_add_device(li, LITEST_THINKPAD_EXTRABUTTONS);
 	extmouse = litest_add_device(li, LITEST_MOUSE);
 
+	litest_grab_device(lid);
+	litest_grab_device(tabletmode);
+
 	litest_disable_tap(tp->libinput_device);
 
 	/* ABBA test for touchpad internal suspend:
@@ -6785,6 +6766,8 @@ START_TEST(touchpad_suspend_abba)
 	}
 
 out:
+	litest_ungrab_device(lid);
+	litest_ungrab_device(tabletmode);
 	litest_delete_device(lid);
 	litest_delete_device(tabletmode);
 	litest_delete_device(extmouse);
@@ -6805,6 +6788,8 @@ START_TEST(touchpad_suspend_abab)
 	lid = litest_add_device(li, LITEST_LID_SWITCH);
 	tabletmode = litest_add_device(li, LITEST_THINKPAD_EXTRABUTTONS);
 	extmouse = litest_add_device(li, LITEST_MOUSE);
+	litest_grab_device(lid);
+	litest_grab_device(tabletmode);
 
 	litest_disable_tap(tp->libinput_device);
 
@@ -6936,6 +6921,8 @@ START_TEST(touchpad_suspend_abab)
 	}
 
 out:
+	litest_ungrab_device(lid);
+	litest_ungrab_device(tabletmode);
 	litest_delete_device(lid);
 	litest_delete_device(tabletmode);
 	litest_delete_device(extmouse);

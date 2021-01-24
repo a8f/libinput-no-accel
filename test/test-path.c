@@ -456,7 +456,6 @@ END_TEST
 START_TEST(path_add_invalid_path)
 {
 	struct libinput *li;
-	struct libinput_event *event;
 	struct libinput_device *device;
 
 	li = litest_create_context();
@@ -468,10 +467,9 @@ START_TEST(path_add_invalid_path)
 
 	libinput_dispatch(li);
 
-	while ((event = libinput_get_event(li)))
-		ck_abort();
+	litest_assert_empty_queue(li);
 
-	libinput_unref(li);
+	litest_destroy_context(li);
 }
 END_TEST
 
@@ -1009,7 +1007,7 @@ START_TEST(path_ignore_device)
 	device = libinput_path_add_device(li, path);
 	ck_assert(device == NULL);
 
-	libinput_unref(li);
+	litest_destroy_context(li);
 	litest_delete_device(dev);
 }
 END_TEST

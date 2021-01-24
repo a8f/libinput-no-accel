@@ -350,6 +350,7 @@ tp_begin_touch(struct tp_dispatch *tp, struct tp_touch *t, uint64_t time)
 	t->dirty = true;
 	t->state = TOUCH_BEGIN;
 	t->time = time;
+	t->initial_time = time;
 	t->was_down = true;
 	tp->nfingers_down++;
 	t->palm.time = time;
@@ -747,6 +748,10 @@ tp_process_key(struct tp_dispatch *tp,
 	       const struct input_event *e,
 	       uint64_t time)
 {
+	/* ignore kernel key repeat */
+	if (e->value == 2)
+		return;
+
 	switch (e->code) {
 		case BTN_LEFT:
 		case BTN_MIDDLE:
@@ -1196,8 +1201,9 @@ out:
 		break;
 	}
 	evdev_log_debug(tp->device,
-		  "palm: touch %d, palm detected (%s)\n",
+		  "palm: touch %d (%s), palm detected (%s)\n",
 		  t->index,
+		  touch_state_to_str(t->state),
 		  palm_state);
 }
 
@@ -1493,6 +1499,13 @@ tp_detect_jumps(const struct tp_dispatch *tp,
 	 * were measured from */
 	unsigned int reference_interval = ms2us(12);
 
+	/* On some touchpads the firmware does funky stuff and we cannot
+	 * have our own jump detection, e.g. Lenovo Carbon X1 Gen 6 (see
+	 * issue #506)
+	 */
+	if (tp->jump.detection_disabled)
+		return false;
+
 	/* We haven't seen pointer jumps on Wacom tablets yet, so exclude
 	 * those.
 	 */
@@ -1528,6 +1541,19 @@ tp_detect_jumps(const struct tp_dispatch *tp,
 	mm = evdev_device_unit_delta_to_mm(tp->device, &delta);
 	abs_distance = hypot(mm.x, mm.y) * reference_interval/tdelta;
 	rel_distance = abs_distance - t->jumps.last_delta_mm;
+
+	/* Special case for the ALPS devices in the Lenovo ThinkPad E465,
+	 * E550. These devices send occasional 4095/0 events on two fingers
+	 * before snapping back to the correct position.
+	 * https://gitlab.freedesktop.org/libinput/libinput/-/issues/492
+	 * The specific values are hardcoded here, if this ever happens on
+	 * any other device we can make it absmax/absmin instead.
+	 */
+	if (tp->device->model_flags & EVDEV_MODEL_ALPS_SERIAL_TOUCHPAD &&
+	    t->point.x == 4095 && t->point.y == 0) {
+		t->point = last->point;
+		return true;
+	}
 
 	/* Cursor jump if:
 	 * - current single-event delta is >20mm, or
@@ -2681,10 +2707,15 @@ evdev_tag_touchpad(struct evdev_device *device,
 		}
 	}
 
-	/* simple approach: touchpads on USB or Bluetooth are considered
-	 * external, anything else is internal. Exception is Apple -
-	 * internal touchpads are connected over USB and it doesn't have
-	 * external USB touchpads anyway.
+	/* The hwdb is the authority on integration, these heuristics are
+	 * the fallback only (they precede the hwdb too).
+	 *
+	 * Simple approach: USB is unknown, with the exception
+	 * of Apple where internal touchpads are connected over USB and it
+	 * doesn't have external USB touchpads anyway.
+	 *
+	 * Bluetooth touchpads are considered external, anything else is
+	 * internal.
 	 */
 	bustype = libevdev_get_id_bustype(device->evdev);
 	vendor = libevdev_get_id_vendor(device->evdev);
@@ -2911,33 +2942,12 @@ tp_init_slots(struct tp_dispatch *tp,
 	return true;
 }
 
-static uint32_t
-tp_accel_config_get_profiles(struct libinput_device *libinput_device)
-{
-	return LIBINPUT_CONFIG_ACCEL_PROFILE_NONE;
-}
-
 static enum libinput_config_status
 tp_accel_config_set_profile(struct libinput_device *libinput_device,
-			    enum libinput_config_accel_profile profile)
-{
-	return LIBINPUT_CONFIG_STATUS_UNSUPPORTED;
-}
-
-static enum libinput_config_accel_profile
-tp_accel_config_get_profile(struct libinput_device *libinput_device)
-{
-	return LIBINPUT_CONFIG_ACCEL_PROFILE_NONE;
-}
-
-static enum libinput_config_accel_profile
-tp_accel_config_get_default_profile(struct libinput_device *libinput_device)
-{
-	return LIBINPUT_CONFIG_ACCEL_PROFILE_NONE;
-}
+			    enum libinput_config_accel_profile profile);
 
 static bool
-tp_init_accel(struct tp_dispatch *tp)
+tp_init_accel(struct tp_dispatch *tp, enum libinput_config_accel_profile which)
 {
 	struct evdev_device *device = tp->device;
 	int res_x, res_y;
@@ -2959,8 +2969,10 @@ tp_init_accel(struct tp_dispatch *tp)
 	tp->accel.y_scale_coeff = (DEFAULT_MOUSE_DPI/25.4) / res_y;
 	tp->accel.xy_scale_coeff = 1.0 * res_x/res_y;
 
-	if (evdev_device_has_model_quirk(device, QUIRK_MODEL_LENOVO_X230) ||
-	    tp->device->model_flags & EVDEV_MODEL_LENOVO_X220_TOUCHPAD_FW81)
+	if (which == LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT)
+		filter = create_pointer_accelerator_filter_touchpad_flat(dpi);
+	else if (evdev_device_has_model_quirk(device, QUIRK_MODEL_LENOVO_X230) ||
+		 tp->device->model_flags & EVDEV_MODEL_LENOVO_X220_TOUCHPAD_FW81)
 		filter = create_pointer_accelerator_filter_lenovo_x230(dpi, use_v_avg);
 	/*
 	else if (libevdev_get_id_bustype(device->evdev) == BUS_BLUETOOTH)
@@ -2978,14 +2990,47 @@ tp_init_accel(struct tp_dispatch *tp)
 
 	evdev_device_init_pointer_acceleration(tp->device, filter);
 
-	/* we override the profile hooks for accel configuration with hooks
-	 * that don't allow selection of profiles */
-	device->pointer.config.get_profiles = tp_accel_config_get_profiles;
 	device->pointer.config.set_profile = tp_accel_config_set_profile;
-	device->pointer.config.get_profile = tp_accel_config_get_profile;
-	device->pointer.config.get_default_profile = tp_accel_config_get_default_profile;
 
 	return true;
+}
+
+static enum libinput_config_status
+tp_accel_config_set_speed(struct libinput_device *device, double speed)
+{
+	struct evdev_device *dev = evdev_device(device);
+
+	if (!filter_set_speed(dev->pointer.filter, speed))
+		return LIBINPUT_CONFIG_STATUS_INVALID;
+
+	return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static enum libinput_config_status
+tp_accel_config_set_profile(struct libinput_device *libinput_device,
+			    enum libinput_config_accel_profile profile)
+{
+	struct evdev_device *device = evdev_device(libinput_device);
+	struct tp_dispatch *tp = tp_dispatch(device->dispatch);
+	struct motion_filter *filter;
+	double speed;
+
+	filter = device->pointer.filter;
+	if (filter_get_type(filter) == profile)
+		return LIBINPUT_CONFIG_STATUS_SUCCESS;
+
+	speed = filter_get_speed(filter);
+	device->pointer.filter = NULL;
+
+	if (tp_init_accel(tp, profile)) {
+		tp_accel_config_set_speed(libinput_device, speed);
+		filter_destroy(filter);
+	} else {
+		device->pointer.filter = filter;
+		return LIBINPUT_CONFIG_STATUS_UNSUPPORTED;
+	}
+
+	return LIBINPUT_CONFIG_STATUS_SUCCESS;
 }
 
 static uint32_t
@@ -3594,7 +3639,7 @@ tp_init(struct tp_dispatch *tp,
 
 	tp_init_hysteresis(tp);
 
-	if (!tp_init_accel(tp))
+	if (!tp_init_accel(tp, LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE))
 		return false;
 
 	tp_init_tap(tp);
@@ -3605,6 +3650,14 @@ tp_init(struct tp_dispatch *tp,
 	tp_init_scroll(tp, device);
 	tp_init_gesture(tp);
 	tp_init_thumb(tp);
+
+	/* Lenovo X1 Gen6 buffers the events in a weird way, making jump
+	 * detection impossible. See
+	 * https://gitlab.freedesktop.org/libinput/libinput/-/issues/506
+	 */
+	if (evdev_device_has_model_quirk(device,
+					 QUIRK_MODEL_LENOVO_X1GEN6_TOUCHPAD))
+		tp->jump.detection_disabled = true;
 
 	device->seat_caps |= EVDEV_DEVICE_POINTER;
 	if (tp->gesture.enabled)

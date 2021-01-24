@@ -303,6 +303,9 @@ enum litest_device_type {
 	LITEST_ALPS_3FG,
 	LITEST_ELAN_TABLET,
 	LITEST_ABSINFO_OVERRIDE,
+	LITEST_TABLET_MODE_UNRELIABLE,
+	LITEST_KEYBOARD_LOGITECH_MEDIA_KEYBOARD_ELITE,
+	LITEST_SONY_VAIO_KEYS,
 };
 
 #define LITEST_DEVICELESS	-2
@@ -419,6 +422,7 @@ struct range {
 };
 
 struct libinput *litest_create_context(void);
+void litest_destroy_context(struct libinput *li);
 void litest_disable_log_handler(struct libinput *libinput);
 void litest_restore_log_handler(struct libinput *libinput);
 void litest_set_log_handler_bug(struct libinput *libinput);
@@ -510,6 +514,12 @@ litest_add_device_with_overrides(struct libinput *libinput,
 
 struct litest_device *
 litest_current_device(void);
+
+void
+litest_grab_device(struct litest_device *d);
+
+void
+litest_ungrab_device(struct litest_device *d);
 
 void
 litest_delete_device(struct litest_device *d);
@@ -1163,6 +1173,28 @@ static inline int litest_slot_count(struct litest_device *dev)
 		return 2;
 
 	return libevdev_get_num_slots(dev->evdev);
+}
+
+static inline bool
+litest_has_palm_detect_size(struct litest_device *dev)
+{
+	double width, height;
+	unsigned int vendor;
+	unsigned int bustype;
+	int rc;
+
+	vendor = libinput_device_get_id_vendor(dev->libinput_device);
+	bustype = libevdev_get_id_bustype(dev->evdev);
+	if (vendor == VENDOR_ID_WACOM)
+		return 0;
+	if (bustype == BUS_BLUETOOTH)
+		return 0;
+	if (vendor == VENDOR_ID_APPLE)
+		return 1;
+
+	rc = libinput_device_get_size(dev->libinput_device, &width, &height);
+
+	return rc == 0 && width >= 70;
 }
 
 #endif /* LITEST_H */

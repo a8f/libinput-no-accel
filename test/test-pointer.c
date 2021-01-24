@@ -312,7 +312,7 @@ START_TEST(pointer_absolute_initial_state)
 		libinput_event_destroy(ev2);
 	}
 
-	libinput_unref(libinput2);
+	litest_destroy_context(libinput2);
 }
 END_TEST
 
@@ -490,7 +490,7 @@ START_TEST(pointer_button_auto_release)
 		ck_assert_int_eq(buttons[i].released, 1);
 	}
 
-	libinput_unref(libinput);
+	litest_destroy_context(libinput);
 }
 END_TEST
 
@@ -602,33 +602,6 @@ out:
 	return angle;
 }
 
-static enum libinput_pointer_axis_source
-wheel_source(struct litest_device *dev, int which)
-{
-	struct udev_device *d;
-	bool is_tilt = false;
-
-	d = libinput_device_get_udev_device(dev->libinput_device);
-	litest_assert_ptr_notnull(d);
-
-	switch(which) {
-	case REL_WHEEL:
-		is_tilt = !!udev_device_get_property_value(d, "MOUSE_WHEEL_TILT_VERTICAL");
-		break;
-	case REL_HWHEEL:
-		is_tilt = !!udev_device_get_property_value(d, "MOUSE_WHEEL_TILT_HORIZONTAL");
-		break;
-	default:
-		litest_abort_msg("Invalid source axis %d\n", which);
-		break;
-	}
-
-	udev_device_unref(d);
-	return is_tilt ?
-		LIBINPUT_POINTER_AXIS_SOURCE_WHEEL_TILT :
-		LIBINPUT_POINTER_AXIS_SOURCE_WHEEL;
-}
-
 static void
 test_wheel_event(struct litest_device *dev, int which, int amount)
 {
@@ -641,7 +614,7 @@ test_wheel_event(struct litest_device *dev, int which, int amount)
 	double scroll_step, expected, discrete;
 
 	scroll_step = wheel_click_angle(dev, which);
-	source = wheel_source(dev, which);
+	source = LIBINPUT_POINTER_AXIS_SOURCE_WHEEL;
 	expected = amount * scroll_step;
 	discrete = amount;
 
@@ -888,7 +861,7 @@ START_TEST(pointer_seat_button_count)
 
 	for (i = 0; i < num_devices; ++i)
 		litest_delete_device(devices[i]);
-	libinput_unref(libinput);
+	litest_destroy_context(libinput);
 }
 END_TEST
 
@@ -1223,7 +1196,7 @@ START_TEST(pointer_scroll_button_device_remove_while_down)
 	litest_delete_device(dev);
 	libinput_dispatch(li);
 
-	libinput_unref(li);
+	litest_destroy_context(li);
 }
 END_TEST
 
@@ -1941,39 +1914,6 @@ START_TEST(pointer_accel_profile_defaults)
 	ck_assert_int_eq(status, LIBINPUT_CONFIG_STATUS_SUCCESS);
 	profile = libinput_device_config_accel_get_profile(device);
 	ck_assert_int_eq(profile, LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE);
-}
-END_TEST
-
-START_TEST(pointer_accel_profile_defaults_noprofile)
-{
-	struct litest_device *dev = litest_current_device();
-	struct libinput_device *device = dev->libinput_device;
-	enum libinput_config_status status;
-	enum libinput_config_accel_profile profile;
-	uint32_t profiles;
-
-	ck_assert(libinput_device_config_accel_is_available(device));
-
-	profile = libinput_device_config_accel_get_default_profile(device);
-	ck_assert_int_eq(profile, LIBINPUT_CONFIG_ACCEL_PROFILE_NONE);
-
-	profile = libinput_device_config_accel_get_profile(device);
-	ck_assert_int_eq(profile, LIBINPUT_CONFIG_ACCEL_PROFILE_NONE);
-
-	profiles = libinput_device_config_accel_get_profiles(device);
-	ck_assert_int_eq(profiles, LIBINPUT_CONFIG_ACCEL_PROFILE_NONE);
-
-	status = libinput_device_config_accel_set_profile(device,
-							  LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT);
-	ck_assert_int_eq(status, LIBINPUT_CONFIG_STATUS_UNSUPPORTED);
-	profile = libinput_device_config_accel_get_profile(device);
-	ck_assert_int_eq(profile, LIBINPUT_CONFIG_ACCEL_PROFILE_NONE);
-
-	status = libinput_device_config_accel_set_profile(device,
-							  LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE);
-	ck_assert_int_eq(status, LIBINPUT_CONFIG_STATUS_UNSUPPORTED);
-	profile = libinput_device_config_accel_get_profile(device);
-	ck_assert_int_eq(profile, LIBINPUT_CONFIG_ACCEL_PROFILE_NONE);
 }
 END_TEST
 
@@ -3154,7 +3094,7 @@ START_TEST(debounce_remove_device_button_up)
 	litest_timeout_debounce();
 	libinput_dispatch(li);
 
-	libinput_unref(li);
+	litest_destroy_context(li);
 }
 END_TEST
 
@@ -3179,7 +3119,7 @@ START_TEST(debounce_remove_device_button_down)
 	litest_timeout_debounce();
 	libinput_dispatch(li);
 
-	libinput_unref(li);
+	litest_destroy_context(li);
 }
 END_TEST
 
@@ -3240,7 +3180,7 @@ TEST_COLLECTION(pointer)
 	litest_add("pointer:accel", pointer_accel_defaults_absolute_relative, LITEST_ABSOLUTE|LITEST_RELATIVE, LITEST_ANY);
 	litest_add("pointer:accel", pointer_accel_direction_change, LITEST_RELATIVE, LITEST_POINTINGSTICK);
 	litest_add("pointer:accel", pointer_accel_profile_defaults, LITEST_RELATIVE, LITEST_TOUCHPAD);
-	litest_add("pointer:accel", pointer_accel_profile_defaults_noprofile, LITEST_TOUCHPAD, LITEST_ANY);
+	litest_add("pointer:accel", pointer_accel_profile_defaults, LITEST_TOUCHPAD, LITEST_ANY);
 	litest_add("pointer:accel", pointer_accel_profile_invalid, LITEST_RELATIVE, LITEST_ANY);
 	litest_add("pointer:accel", pointer_accel_profile_noaccel, LITEST_ANY, LITEST_TOUCHPAD|LITEST_RELATIVE|LITEST_TABLET);
 	litest_add("pointer:accel", pointer_accel_profile_flat_motion_relative, LITEST_RELATIVE, LITEST_TOUCHPAD);

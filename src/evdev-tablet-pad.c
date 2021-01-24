@@ -332,6 +332,10 @@ pad_process_key(struct pad_dispatch *pad,
 	uint32_t button = e->code;
 	uint32_t is_press = e->value != 0;
 
+	/* ignore kernel key repeat */
+	if (e->value == 2)
+		return;
+
 	pad_button_set_down(pad, button, is_press);
 }
 
@@ -395,7 +399,10 @@ pad_notify_button_mask(struct pad_dispatch *pad,
 			} else if (map_is_key(map)) {
 				uint32_t key = map_value(map);
 
-				tablet_pad_notify_key(base, time, key, state);
+				tablet_pad_notify_key(base,
+						      time,
+						      key,
+						      (enum libinput_key_state)state);
 			} else {
 				abort();
 			}

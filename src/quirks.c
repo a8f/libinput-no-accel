@@ -244,6 +244,7 @@ quirk_get_name(enum quirk q)
 	case QUIRK_MODEL_LENOVO_T450_TOUCHPAD:		return "ModelLenovoT450Touchpad";
 	case QUIRK_MODEL_LENOVO_T480S_TOUCHPAD:		return "ModelLenovoT480sTouchpad";
 	case QUIRK_MODEL_LENOVO_T490S_TOUCHPAD:		return "ModelLenovoT490sTouchpad";
+	case QUIRK_MODEL_LENOVO_X1GEN6_TOUCHPAD:	return "ModelLenovoX1Gen6Touchpad";
 	case QUIRK_MODEL_LENOVO_X230:			return "ModelLenovoX230";
 	case QUIRK_MODEL_SYNAPTICS_SERIAL_TOUCHPAD:	return "ModelSynapticsSerialTouchpad";
 	case QUIRK_MODEL_SYSTEM76_BONOBO:		return "ModelSystem76Bonobo";
@@ -254,7 +255,6 @@ quirk_get_name(enum quirk q)
 	case QUIRK_MODEL_TOUCHPAD_VISIBLE_MARKER:	return "ModelTouchpadVisibleMarker";
 	case QUIRK_MODEL_TRACKBALL:			return "ModelTrackball";
 	case QUIRK_MODEL_WACOM_TOUCHPAD:		return "ModelWacomTouchpad";
-	case QUIRK_MODEL_WACOM_ISDV4_PEN:		return "ModelWacomISDV4Pen";
 	case QUIRK_MODEL_DELL_CANVAS_TOTEM:		return "ModelDellCanvasTotem";
 
 	case QUIRK_ATTR_SIZE_HINT:			return "AttrSizeHint";
@@ -979,15 +979,7 @@ out:
 
 static int
 is_data_file(const struct dirent *dir) {
-	const char *suffix = ".quirks";
-	const int slen = strlen(suffix);
-	int offset;
-
-	offset = strlen(dir->d_name) - slen;
-	if (offset <= 0)
-		return 0;
-
-	return strneq(&dir->d_name[offset], suffix, slen);
+	return strendswith(dir->d_name, ".quirks");
 }
 
 static inline bool

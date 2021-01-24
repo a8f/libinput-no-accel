@@ -1,5 +1,5 @@
 pkgname=libinput
-pkgver=1.15.0.r35.g8dc88a88
+pkgver=1.16.4
 pkgrel=1
 pkgdesc="Input device management and event handling library"
 url="https://www.freedesktop.org/wiki/Software/libinput/"

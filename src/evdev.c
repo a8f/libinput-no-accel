@@ -1018,6 +1018,31 @@ evdev_sync_device(struct evdev_device *device)
 	return rc == -EAGAIN ? 0 : rc;
 }
 
+static inline void
+evdev_note_time_delay(struct evdev_device *device,
+		      const struct input_event *ev)
+{
+	struct libinput *libinput = evdev_libinput_context(device);
+	uint32_t tdelta;
+
+	/* if we have a current libinput_dispatch() snapshot, compare our
+	 * event time with the one from the snapshot. If we have more than
+	 * 10ms delay, complain about it. This catches delays in processing
+	 * where there is no steady event flow and thus SYN_DROPPED may not
+	 * get hit by the kernel despite us being too slow.
+	 */
+	if (libinput->dispatch_time == 0)
+		return;
+
+	tdelta = us2ms(libinput->dispatch_time - input_event_time(ev));
+	if (tdelta > 10) {
+		evdev_log_bug_client_ratelimit(device,
+					       &device->delay_warning_limit,
+					       "event processing lagging behind by %dms, your system is too slow\n",
+					       tdelta);
+	}
+}
+
 static void
 evdev_device_dispatch(void *data)
 {
@@ -1025,6 +1050,7 @@ evdev_device_dispatch(void *data)
 	struct libinput *libinput = evdev_libinput_context(device);
 	struct input_event ev;
 	int rc;
+	bool once = false;
 
 	/* If the compositor is repainting, this function is called only once
 	 * per frame and we have to process all the events available on the
@@ -1047,6 +1073,10 @@ evdev_device_dispatch(void *data)
 			if (rc == 0)
 				rc = LIBEVDEV_READ_STATUS_SUCCESS;
 		} else if (rc == LIBEVDEV_READ_STATUS_SUCCESS) {
+			if (!once) {
+				evdev_note_time_delay(device, &ev);
+				once = true;
+			}
 			evdev_device_dispatch_one(device, &ev);
 		}
 	} while (rc == LIBEVDEV_READ_STATUS_SUCCESS);
@@ -1274,21 +1304,6 @@ evdev_read_wheel_click_props(struct evdev_device *device)
 	}
 
 	return angles;
-}
-
-static inline struct wheel_tilt_flags
-evdev_read_wheel_tilt_props(struct evdev_device *device)
-{
-	struct wheel_tilt_flags flags;
-
-	flags.vertical = parse_udev_flag(device,
-					 device->udev_device,
-					 "MOUSE_WHEEL_TILT_VERTICAL");
-
-	flags.horizontal = parse_udev_flag(device,
-					 device->udev_device,
-					 "MOUSE_WHEEL_TILT_HORIZONTAL");
-	return flags;
 }
 
 static inline double
@@ -1795,8 +1810,6 @@ evdev_configure_device(struct evdev_device *device)
 		evdev_disable_accelerometer_axes(device);
 	}
 
-	/* libwacom *adds* TABLET, TOUCHPAD but leaves JOYSTICK in place, so
-	   make sure we only ignore real joystick devices */
 	if (udev_tags == (EVDEV_UDEV_TAG_INPUT|EVDEV_UDEV_TAG_JOYSTICK)) {
 		evdev_log_info(device,
 			       "device is a joystick, ignoring\n");
@@ -1908,15 +1921,20 @@ evdev_configure_device(struct evdev_device *device)
 
 		if (libevdev_has_event_code(evdev, EV_SW, SW_TABLET_MODE)) {
 		    if (evdev_device_has_model_quirk(device,
-				 QUIRK_MODEL_TABLET_MODE_SWITCH_UNRELIABLE))
+				 QUIRK_MODEL_TABLET_MODE_SWITCH_UNRELIABLE)) {
 			    evdev_log_info(device,
-				"device is an unreliable tablet mode switch.\n");
-		    else
+				"device is an unreliable tablet mode switch, filtering events.\n");
+			    libevdev_disable_event_code(device->evdev,
+							EV_SW,
+							SW_TABLET_MODE);
+		    } else {
 			    device->tags |= EVDEV_TAG_TABLET_MODE_SWITCH;
-
-		    device->seat_caps |= EVDEV_DEVICE_SWITCH;
-		    evdev_log_info(device, "device is a switch device\n");
+			    device->seat_caps |= EVDEV_DEVICE_SWITCH;
+		    }
 		}
+
+		if (device->seat_caps & EVDEV_DEVICE_SWITCH)
+		    evdev_log_info(device, "device is a switch device\n");
 	}
 
 	if (device->seat_caps & EVDEV_DEVICE_POINTER &&
@@ -2202,12 +2220,13 @@ evdev_device_create(struct libinput_seat *seat,
 	device->scroll.direction = 0;
 	device->scroll.wheel_click_angle =
 		evdev_read_wheel_click_props(device);
-	device->scroll.is_tilt = evdev_read_wheel_tilt_props(device);
 	device->model_flags = evdev_read_model_flags(device);
 	device->dpi = DEFAULT_MOUSE_DPI;
 
 	/* at most 5 SYN_DROPPED log-messages per 30s */
 	ratelimit_init(&device->syn_drop_limit, s2us(30), 5);
+	/* at most 5 "delayed processing" log messages per hour */
+	ratelimit_init(&device->delay_warning_limit, s2us(60 * 60), 5);
 	/* at most 5 log-messages per 5s */
 	ratelimit_init(&device->nonpointer_rel_limit, s2us(5), 5);
 
@@ -2218,11 +2237,8 @@ evdev_device_create(struct libinput_seat *seat,
 	evdev_pre_configure_model_quirks(device);
 
 	device->dispatch = evdev_configure_device(device);
-	if (device->dispatch == NULL) {
-		if (device->seat_caps == 0)
-			unhandled_device = 1;
+	if (device->dispatch == NULL || device->seat_caps == 0)
 		goto err;
-	}
 
 	device->source =
 		libinput_add_fd(libinput, fd, evdev_device_dispatch, device);
@@ -2240,8 +2256,10 @@ evdev_device_create(struct libinput_seat *seat,
 
 err:
 	close_restricted(libinput, fd);
-	if (device)
+	if (device) {
+		unhandled_device = device->seat_caps == 0;
 		evdev_device_destroy(device);
+	}
 
 	return unhandled_device ? EVDEV_UNHANDLED_DEVICE :  NULL;
 }

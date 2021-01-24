@@ -803,8 +803,9 @@ tp_tap_handle_event(struct tp_dispatch *tp,
 
 	if (current != tp->tap.state)
 		evdev_log_debug(tp->device,
-			  "tap: touch %d state %s → %s → %s\n",
+			  "tap: touch %d (%s), tap state %s → %s → %s\n",
 			  t ? (int)t->index : -1,
+			  t ? touch_state_to_str(t->state) : "",
 			  tap_state_to_str(current),
 			  tap_event_to_str(event),
 			  tap_state_to_str(tp->tap.state));
@@ -893,10 +894,10 @@ tp_tap_handle_state(struct tp_dispatch *tp, uint64_t time)
 
 		if (t->palm.state != PALM_NONE) {
 			assert(!t->tap.is_palm);
-			tp_tap_handle_event(tp, t, TAP_EVENT_PALM, time);
 			t->tap.is_palm = true;
 			t->tap.state = TAP_TOUCH_STATE_DEAD;
 			if (t->state != TOUCH_BEGIN) {
+				tp_tap_handle_event(tp, t, TAP_EVENT_PALM, time);
 				assert(tp->tap.nfingers_down > 0);
 				tp->tap.nfingers_down--;
 			}

@@ -1,8 +1,8 @@
 project('libinput', 'c',
-	version : '1.15.5',
+	version : '1.16.4',
 	license : 'MIT/Expat',
 	default_options : [ 'c_std=gnu99', 'warning_level=2' ],
-	meson_version : '>= 0.41.0')
+	meson_version : '>= 0.45.0')
 
 libinput_version = meson.project_version().split('.')
 
@@ -289,6 +289,7 @@ src_libfilter = [
 		'src/filter-low-dpi.c',
 		'src/filter-mouse.c',
 		'src/filter-touchpad.c',
+		'src/filter-touchpad-flat.c',
 		'src/filter-touchpad-x230.c',
 		'src/filter-tablet.c',
 		'src/filter-trackpoint.c',
@@ -306,47 +307,11 @@ libinput_data_override_path = join_paths(dir_sysconf, 'local-overrides.quirks')
 config_h.set_quoted('LIBINPUT_QUIRKS_DIR', dir_data)
 config_h.set_quoted('LIBINPUT_QUIRKS_OVERRIDE_FILE', libinput_data_override_path)
 
-quirks_data = [
-	'quirks/10-generic-keyboard.quirks',
-	'quirks/10-generic-lid.quirks',
-	'quirks/10-generic-trackball.quirks',
-	'quirks/30-vendor-aiptek.quirks',
-	'quirks/30-vendor-alps.quirks',
-	'quirks/30-vendor-contour.quirks',
-	'quirks/30-vendor-cypress.quirks',
-	'quirks/30-vendor-elantech.quirks',
-	'quirks/30-vendor-ibm.quirks',
-	'quirks/30-vendor-kensington.quirks',
-	'quirks/30-vendor-logitech.quirks',
-	'quirks/30-vendor-madcatz.quirks',
-	'quirks/30-vendor-microsoft.quirks',
-	'quirks/30-vendor-razer.quirks',
-	'quirks/30-vendor-synaptics.quirks',
-	'quirks/30-vendor-vmware.quirks',
-	'quirks/30-vendor-wacom.quirks',
-	'quirks/50-system-acer.quirks',
-	'quirks/50-system-apple.quirks',
-	'quirks/50-system-asus.quirks',
-	'quirks/50-system-chicony.quirks',
-	'quirks/50-system-cyborg.quirks',
-	'quirks/50-system-dell.quirks',
-	'quirks/50-system-google.quirks',
-	'quirks/50-system-hp.quirks',
-	'quirks/50-system-lenovo.quirks',
-	'quirks/50-system-system76.quirks',
-	'quirks/50-system-toshiba.quirks',
-]
-
-test('quirks-in-meson.build',
-     find_program('quirks/test-quirks-in-meson.build.sh'),
-     args : [meson.current_source_dir()],
-     suite : ['all']
-     )
-
-config_h.set_quoted('LIBINPUT_QUIRKS_FILES', ':'.join(quirks_data))
 config_h.set_quoted('LIBINPUT_QUIRKS_SRCDIR', dir_src_quirks)
-
-install_data(quirks_data, install_dir : dir_data)
+install_subdir('quirks',
+	       exclude_files: ['README.md'],
+	       install_dir : dir_data,
+	       strip_directory : true)
 
 src_libquirks = [
 	'src/quirks.c',
@@ -577,8 +542,24 @@ configure_file(input : 'tools/libinput-measure.man',
 	       install_dir : dir_man1,
 	       )
 
+libinput_analyze_sources = [ 'tools/libinput-analyze.c' ]
+executable('libinput-analyze',
+	   libinput_analyze_sources,
+	   dependencies : deps_tools,
+	   include_directories : [includes_src, includes_include],
+	   install_dir : libinput_tool_path,
+	   install : true,
+	   )
+configure_file(input : 'tools/libinput-analyze.man',
+	       output : 'libinput-analyze.1',
+	       configuration : man_config,
+	       install_dir : dir_man1,
+	       )
+
 src_python_tools = files(
+	      'tools/libinput-analyze-per-slot-delta.py',
 	      'tools/libinput-measure-fuzz.py',
+	      'tools/libinput-measure-touchpad-size.py',
 	      'tools/libinput-measure-touchpad-tap.py',
 	      'tools/libinput-measure-touchpad-pressure.py',
 	      'tools/libinput-measure-touch-size.py',
@@ -601,9 +582,11 @@ endforeach
 
 src_man = files(
 	      'tools/libinput-measure-fuzz.man',
+	      'tools/libinput-measure-touchpad-size.man',
 	      'tools/libinput-measure-touchpad-tap.man',
 	      'tools/libinput-measure-touchpad-pressure.man',
 	      'tools/libinput-measure-touch-size.man',
+	      'tools/libinput-analyze-per-slot-delta.man',
 )
 
 foreach m : src_man
@@ -686,13 +669,16 @@ executable('ptraccel-debug',
 # subtool lookup
 if get_option('buildtype') == 'debug' or get_option('buildtype') == 'debugoptimized'
 	config_tool_option_test = configuration_data()
+	config_tool_option_test.set('DISABLE_WARNING', 'yes')
 	config_tool_option_test.set('MESON_ENABLED_DEBUG_GUI', get_option('debug-gui'))
-	tool_option_test = configure_file(input: 'tools/test-tool-option-parsing.py',
-					  output: '@BASENAME@',
+	config_tool_option_test.set('MESON_BUILD_ROOT', meson.current_build_dir())
+	config_tool_option_test.set('TOOL_PATH', libinput_tool.full_path())
+	tool_option_test = configure_file(input: 'tools/test_tool_option_parsing.py',
+					  output: '@PLAINNAME@',
 					  configuration : config_tool_option_test)
 	test('tool-option-parsing',
 	     tool_option_test,
-	     args : ['--tool-path', libinput_tool.full_path()],
+	     args : [tool_option_test, '-n', 'auto'],
 	     suite : ['all', 'root'],
 	     timeout : 240)
 endif
@@ -799,6 +785,7 @@ if get_option('tests')
 		'test/litest-device-keyboard-razer-blade-stealth-videoswitch.c',
 		'test/litest-device-lid-switch.c',
 		'test/litest-device-lid-switch-surface3.c',
+		'test/litest-device-logitech-media-keyboard-elite.c',
 		'test/litest-device-logitech-trackball.c',
 		'test/litest-device-nexus4-touch-screen.c',
 		'test/litest-device-magic-trackpad.c',
@@ -812,6 +799,7 @@ if get_option('tests')
 		'test/litest-device-ms-surface-cover.c',
 		'test/litest-device-protocol-a-touch-screen.c',
 		'test/litest-device-qemu-usb-tablet.c',
+		'test/litest-device-sony-vaio-keys.c',
 		'test/litest-device-synaptics-x220.c',
 		'test/litest-device-synaptics-hover.c',
 		'test/litest-device-synaptics-i2c.c',
@@ -819,6 +807,7 @@ if get_option('tests')
 		'test/litest-device-synaptics-st.c',
 		'test/litest-device-synaptics-t440.c',
 		'test/litest-device-synaptics-x1-carbon-3rd.c',
+		'test/litest-device-tablet-mode-switch.c',
 		'test/litest-device-thinkpad-extrabuttons.c',
 		'test/litest-device-trackpoint.c',
 		'test/litest-device-touch-screen.c',
