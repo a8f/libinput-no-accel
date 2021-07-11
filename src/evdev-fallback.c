@@ -61,6 +61,19 @@ fallback_lid_notify_toggle(struct fallback_dispatch *dispatch,
 	}
 }
 
+void
+fallback_notify_physical_button(struct fallback_dispatch *dispatch,
+				struct evdev_device *device,
+				uint64_t time,
+				int button,
+				enum libinput_button_state state)
+{
+	if (button == BTN_MIDDLE)
+		dispatch->wheel.is_inhibited = (state == LIBINPUT_BUTTON_STATE_PRESSED);
+
+	evdev_pointer_notify_physical_button(device, time, button, state);
+}
+
 static enum libinput_switch_state
 fallback_interface_get_switch_state(struct evdev_dispatch *evdev_dispatch,
 				    enum libinput_switch sw)
@@ -212,25 +225,31 @@ fallback_flush_wheels(struct fallback_dispatch *dispatch,
 	if (!(device->seat_caps & EVDEV_DEVICE_POINTER))
 		return;
 
+	if (dispatch->wheel.is_inhibited) {
+		dispatch->wheel.delta.x = 0;
+		dispatch->wheel.delta.y = 0;
+		return;
+	}
+
 	if (device->model_flags & EVDEV_MODEL_LENOVO_SCROLLPOINT) {
 		struct normalized_coords unaccel = { 0.0, 0.0 };
 
-		dispatch->wheel.y *= -1;
-		normalize_delta(device, &dispatch->wheel, &unaccel);
+		dispatch->wheel.delta.y *= -1;
+		normalize_delta(device, &dispatch->wheel.delta, &unaccel);
 		evdev_post_scroll(device,
 				  time,
 				  LIBINPUT_POINTER_AXIS_SOURCE_CONTINUOUS,
 				  &unaccel);
-		dispatch->wheel.x = 0;
-		dispatch->wheel.y = 0;
+		dispatch->wheel.delta.x = 0;
+		dispatch->wheel.delta.y = 0;
 
 		return;
 	}
 
-	if (dispatch->wheel.y != 0) {
-		wheel_degrees.y = -1 * dispatch->wheel.y *
+	if (dispatch->wheel.delta.y != 0) {
+		wheel_degrees.y = -1 * dispatch->wheel.delta.y *
 					device->scroll.wheel_click_angle.y;
-		discrete.y = -1 * dispatch->wheel.y;
+		discrete.y = -1 * dispatch->wheel.delta.y;
 
 		evdev_notify_axis(
 			device,
@@ -239,13 +258,13 @@ fallback_flush_wheels(struct fallback_dispatch *dispatch,
 			LIBINPUT_POINTER_AXIS_SOURCE_WHEEL,
 			&wheel_degrees,
 			&discrete);
-		dispatch->wheel.y = 0;
+		dispatch->wheel.delta.y = 0;
 	}
 
-	if (dispatch->wheel.x != 0) {
-		wheel_degrees.x = dispatch->wheel.x *
+	if (dispatch->wheel.delta.x != 0) {
+		wheel_degrees.x = dispatch->wheel.delta.x *
 					device->scroll.wheel_click_angle.x;
-		discrete.x = dispatch->wheel.x;
+		discrete.x = dispatch->wheel.delta.x;
 
 		evdev_notify_axis(
 			device,
@@ -254,7 +273,7 @@ fallback_flush_wheels(struct fallback_dispatch *dispatch,
 			LIBINPUT_POINTER_AXIS_SOURCE_WHEEL,
 			&wheel_degrees,
 			&discrete);
-		dispatch->wheel.x = 0;
+		dispatch->wheel.delta.x = 0;
 	}
 }
 
@@ -827,11 +846,11 @@ fallback_process_relative(struct fallback_dispatch *dispatch,
 		dispatch->pending_event |= EVDEV_RELATIVE_MOTION;
 		break;
 	case REL_WHEEL:
-		dispatch->wheel.y += e->value;
+		dispatch->wheel.delta.y += e->value;
 		dispatch->pending_event |= EVDEV_WHEEL;
 		break;
 	case REL_HWHEEL:
-		dispatch->wheel.x += e->value;
+		dispatch->wheel.delta.x += e->value;
 		dispatch->pending_event |= EVDEV_WHEEL;
 		break;
 	}
@@ -1158,7 +1177,7 @@ static void
 fallback_interface_remove(struct evdev_dispatch *evdev_dispatch)
 {
 	struct fallback_dispatch *dispatch = fallback_dispatch(evdev_dispatch);
-	struct evdev_paired_keyboard *kbd, *tmp;
+	struct evdev_paired_keyboard *kbd;
 
 	libinput_timer_cancel(&dispatch->debounce.timer);
 	libinput_timer_cancel(&dispatch->debounce.timer_short);
@@ -1167,7 +1186,6 @@ fallback_interface_remove(struct evdev_dispatch *evdev_dispatch)
 	libinput_device_remove_event_listener(&dispatch->tablet_mode.other.listener);
 
 	list_for_each_safe(kbd,
-			   tmp,
 			   &dispatch->lid.paired_keyboard_list,
 			   link) {
 		evdev_paired_keyboard_destroy(kbd);
@@ -1433,10 +1451,9 @@ fallback_interface_device_removed(struct evdev_device *device,
 {
 	struct fallback_dispatch *dispatch =
 			fallback_dispatch(device->dispatch);
-	struct evdev_paired_keyboard *kbd, *tmp;
+	struct evdev_paired_keyboard *kbd;
 
 	list_for_each_safe(kbd,
-			   tmp,
 			   &dispatch->lid.paired_keyboard_list,
 			   link) {
 		if (!kbd->device)

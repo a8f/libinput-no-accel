@@ -72,11 +72,8 @@ enum quirk {
 	QUIRK_MODEL_HP_STREAM11_TOUCHPAD,
 	QUIRK_MODEL_HP_ZBOOK_STUDIO_G3,
 	QUIRK_MODEL_INVERT_HORIZONTAL_SCROLLING,
-	QUIRK_MODEL_LENOVO_L380_TOUCHPAD,
 	QUIRK_MODEL_LENOVO_SCROLLPOINT,
 	QUIRK_MODEL_LENOVO_T450_TOUCHPAD,
-	QUIRK_MODEL_LENOVO_T480S_TOUCHPAD,
-	QUIRK_MODEL_LENOVO_T490S_TOUCHPAD,
 	QUIRK_MODEL_LENOVO_X1GEN6_TOUCHPAD,
 	QUIRK_MODEL_LENOVO_X230,
 	QUIRK_MODEL_SYNAPTICS_SERIAL_TOUCHPAD,
@@ -109,6 +106,9 @@ enum quirk {
 	QUIRK_ATTR_THUMB_SIZE_THRESHOLD,
 	QUIRK_ATTR_MSC_TIMESTAMP,
 	QUIRK_ATTR_EVENT_CODE_DISABLE,
+	QUIRK_ATTR_EVENT_CODE_ENABLE,
+	QUIRK_ATTR_INPUT_PROP_DISABLE,
+	QUIRK_ATTR_INPUT_PROP_ENABLE,
 
 	_QUIRK_LAST_ATTR_QUIRK_, /* Guard: do not modify */
 };
@@ -118,7 +118,7 @@ enum quirk {
  * tools, not user consumption. Do not display this in a GUI.
  */
 const char*
-quirk_get_name(enum quirk which);
+quirk_get_name(enum quirk q);
 
 /**
  * Log priorities used if custom logging is enabled.
@@ -312,3 +312,17 @@ bool
 quirks_get_tuples(struct quirks *q,
 		  enum quirk which,
 		  const struct quirk_tuples **tuples);
+
+/**
+ * Get the uint32 array of the given quirk.
+ * This function will assert if the quirk type does not match the
+ * requested type. If the quirk is not set for this device, tuples is
+ * unchanged.
+ *
+ * @return true if the quirk value is valid, false otherwise.
+ */
+bool
+quirks_get_uint32_array(struct quirks *q,
+			enum quirk which,
+			const uint32_t **array,
+			size_t *nelements);

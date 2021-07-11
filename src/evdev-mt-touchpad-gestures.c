@@ -138,11 +138,10 @@ tp_gesture_start(struct tp_dispatch *tp, uint64_t time)
 	tp->gesture.started = true;
 }
 
-static void
-tp_gesture_post_pointer_motion(struct tp_dispatch *tp, uint64_t time)
+static struct device_float_coords
+tp_get_raw_pointer_motion(struct tp_dispatch *tp)
 {
 	struct device_float_coords raw;
-	struct normalized_coords delta;
 
 	/* When a clickpad is clicked, combine motion of all active touches */
 	if (tp->buttons.is_clickpad && tp->buttons.state)
@@ -150,6 +149,16 @@ tp_gesture_post_pointer_motion(struct tp_dispatch *tp, uint64_t time)
 	else
 		raw = tp_get_average_touches_delta(tp);
 
+	return raw;
+}
+
+static void
+tp_gesture_post_pointer_motion(struct tp_dispatch *tp, uint64_t time)
+{
+	struct device_float_coords raw;
+	struct normalized_coords delta;
+
+	raw = tp_get_raw_pointer_motion(tp);
 	delta = tp_filter_motion(tp, &raw, time);
 
 	if (!normalized_is_zero(delta) || !device_float_is_zero(raw)) {
@@ -194,6 +203,33 @@ tp_gesture_get_active_touches(const struct tp_dispatch *tp,
 	return n;
 }
 
+static inline int
+tp_gesture_same_directions(int dir1, int dir2)
+{
+	/*
+	 * In some cases (semi-mt touchpads) we may seen one finger move
+	 * e.g. N/NE and the other W/NW so we not only check for overlapping
+	 * directions, but also for neighboring bits being set.
+	 * The ((dira & 0x80) && (dirb & 0x01)) checks are to check for bit 0
+	 * and 7 being set as they also represent neighboring directions.
+	 */
+	return ((dir1 | (dir1 >> 1)) & dir2) ||
+		((dir2 | (dir2 >> 1)) & dir1) ||
+		((dir1 & 0x80) && (dir2 & 0x01)) ||
+		((dir2 & 0x80) && (dir1 & 0x01));
+}
+
+static struct phys_coords
+tp_gesture_mm_moved(struct tp_dispatch *tp, struct tp_touch *t)
+{
+	struct device_coords delta;
+
+	delta.x = abs(t->point.x - t->gesture.initial.x);
+	delta.y = abs(t->point.y - t->gesture.initial.y);
+
+	return evdev_device_unit_delta_to_mm(tp->device, &delta);
+}
+
 static uint32_t
 tp_gesture_get_direction(struct tp_dispatch *tp, struct tp_touch *touch)
 {
@@ -223,6 +259,16 @@ tp_gesture_get_pinch_info(struct tp_dispatch *tp,
 	*angle = atan2(normalized.y, normalized.x) * 180.0 / M_PI;
 
 	*center = device_average(first->point, second->point);
+}
+
+static inline void
+tp_gesture_init_pinch(struct tp_dispatch *tp)
+{
+	tp_gesture_get_pinch_info(tp,
+				  &tp->gesture.initial_distance,
+				  &tp->gesture.angle,
+				  &tp->gesture.center);
+	tp->gesture.prev_scale = 1.0;
 }
 
 static void
@@ -369,107 +415,7 @@ tp_gesture_apply_scroll_constraints(struct tp_dispatch *tp,
 }
 
 static enum tp_gesture_state
-tp_gesture_handle_state_none(struct tp_dispatch *tp, uint64_t time)
-{
-	struct tp_touch *first, *second;
-	struct tp_touch *touches[4];
-	unsigned int ntouches;
-	unsigned int i;
-
-	ntouches = tp_gesture_get_active_touches(tp, touches, 4);
-	if (ntouches < 2)
-		return GESTURE_STATE_NONE;
-
-	if (!tp->gesture.enabled) {
-		if (ntouches == 2)
-			return GESTURE_STATE_SCROLL;
-		else
-			return GESTURE_STATE_NONE;
-	}
-
-	first = touches[0];
-	second = touches[1];
-
-	/* For 3+ finger gestures, we only really need to track two touches.
-	 * The human hand's finger arrangement means that for a pinch, the
-	 * bottom-most touch will always be the thumb, and the top-most touch
-	 * will always be one of the fingers.
-	 *
-	 * For 3+ finger swipes, the fingers will likely (but not necessarily)
-	 * be in a horizontal line. They all move together, regardless, so it
-	 * doesn't really matter which two of those touches we track.
-	 *
-	 * Tracking top and bottom is a change from previous versions, where
-	 * we tracked leftmost and rightmost. This change enables:
-	 *
-	 * - More accurate pinch detection if thumb is near the center
-	 * - Better resting-thumb detection while two-finger scrolling
-	 * - On capable hardware, allow 3- or 4-finger swipes with resting
-	 *   thumb or held-down clickpad
-	 */
-	if (ntouches > 2) {
-		second = touches[0];
-
-		for (i = 1; i < ntouches && i < tp->num_slots; i++) {
-			if (touches[i]->point.y < first->point.y)
-				first = touches[i];
-			else if (touches[i]->point.y >= second->point.y)
-				second = touches[i];
-		}
-
-		if (first == second)
-			return GESTURE_STATE_NONE;
-
-	}
-
-	tp->gesture.initial_time = time;
-	first->gesture.initial = first->point;
-	second->gesture.initial = second->point;
-	tp->gesture.touches[0] = first;
-	tp->gesture.touches[1] = second;
-
-	return GESTURE_STATE_UNKNOWN;
-}
-
-static inline int
-tp_gesture_same_directions(int dir1, int dir2)
-{
-	/*
-	 * In some cases (semi-mt touchpads) we may seen one finger move
-	 * e.g. N/NE and the other W/NW so we not only check for overlapping
-	 * directions, but also for neighboring bits being set.
-	 * The ((dira & 0x80) && (dirb & 0x01)) checks are to check for bit 0
-	 * and 7 being set as they also represent neighboring directions.
-	 */
-	return ((dir1 | (dir1 >> 1)) & dir2) ||
-		((dir2 | (dir2 >> 1)) & dir1) ||
-		((dir1 & 0x80) && (dir2 & 0x01)) ||
-		((dir2 & 0x80) && (dir1 & 0x01));
-}
-
-static inline void
-tp_gesture_init_pinch(struct tp_dispatch *tp)
-{
-	tp_gesture_get_pinch_info(tp,
-				  &tp->gesture.initial_distance,
-				  &tp->gesture.angle,
-				  &tp->gesture.center);
-	tp->gesture.prev_scale = 1.0;
-}
-
-static struct phys_coords
-tp_gesture_mm_moved(struct tp_dispatch *tp, struct tp_touch *t)
-{
-	struct device_coords delta;
-
-	delta.x = abs(t->point.x - t->gesture.initial.x);
-	delta.y = abs(t->point.y - t->gesture.initial.y);
-
-	return evdev_device_unit_delta_to_mm(tp->device, &delta);
-}
-
-static enum tp_gesture_state
-tp_gesture_handle_state_unknown(struct tp_dispatch *tp, uint64_t time)
+tp_gesture_detect_motion_gestures(struct tp_dispatch *tp, uint64_t time)
 {
 	struct tp_touch *first = tp->gesture.touches[0],
 			*second = tp->gesture.touches[1],
@@ -531,9 +477,8 @@ tp_gesture_handle_state_unknown(struct tp_dispatch *tp, uint64_t time)
 		if (tp->gesture.finger_count == 2) {
 			tp_gesture_set_scroll_buildup(tp);
 			return GESTURE_STATE_SCROLL;
-		} else {
-			return GESTURE_STATE_SWIPE;
 		}
+		return GESTURE_STATE_SWIPE;
 	}
 
 	/* If one touch exceeds the max_move threshold while the other has not
@@ -595,7 +540,9 @@ tp_gesture_handle_state_unknown(struct tp_dispatch *tp, uint64_t time)
 		if (tp->gesture.finger_count == 2) {
 			tp_gesture_set_scroll_buildup(tp);
 			return GESTURE_STATE_SCROLL;
-		} else if (tp->gesture.enabled) {
+		}
+
+		if (tp->gesture.enabled) {
 			return GESTURE_STATE_SWIPE;
 		}
 	}
@@ -603,6 +550,75 @@ tp_gesture_handle_state_unknown(struct tp_dispatch *tp, uint64_t time)
 	/* If the touches are moving away from each other, this is a pinch */
 	tp_gesture_init_pinch(tp);
 	return GESTURE_STATE_PINCH;
+}
+
+static enum tp_gesture_state
+tp_gesture_handle_state_none(struct tp_dispatch *tp, uint64_t time)
+{
+	struct tp_touch *first, *second;
+	struct tp_touch *touches[4];
+	unsigned int ntouches;
+	unsigned int i;
+
+	ntouches = tp_gesture_get_active_touches(tp, touches, 4);
+	if (ntouches < 2)
+		return GESTURE_STATE_NONE;
+
+	if (!tp->gesture.enabled) {
+		if (ntouches == 2)
+			return GESTURE_STATE_SCROLL;
+		return GESTURE_STATE_NONE;
+	}
+
+	first = touches[0];
+	second = touches[1];
+
+	/* For 3+ finger gestures, we only really need to track two touches.
+	 * The human hand's finger arrangement means that for a pinch, the
+	 * bottom-most touch will always be the thumb, and the top-most touch
+	 * will always be one of the fingers.
+	 *
+	 * For 3+ finger swipes, the fingers will likely (but not necessarily)
+	 * be in a horizontal line. They all move together, regardless, so it
+	 * doesn't really matter which two of those touches we track.
+	 *
+	 * Tracking top and bottom is a change from previous versions, where
+	 * we tracked leftmost and rightmost. This change enables:
+	 *
+	 * - More accurate pinch detection if thumb is near the center
+	 * - Better resting-thumb detection while two-finger scrolling
+	 * - On capable hardware, allow 3- or 4-finger swipes with resting
+	 *   thumb or held-down clickpad
+	 */
+	if (ntouches > 2) {
+		second = touches[0];
+
+		for (i = 1; i < ntouches && i < tp->num_slots; i++) {
+			if (touches[i]->point.y < first->point.y)
+				first = touches[i];
+			else if (touches[i]->point.y >= second->point.y)
+				second = touches[i];
+		}
+
+		if (first == second)
+			return GESTURE_STATE_NONE;
+
+	}
+
+	tp->gesture.initial_time = time;
+	first->gesture.initial = first->point;
+	second->gesture.initial = second->point;
+	tp->gesture.touches[0] = first;
+	tp->gesture.touches[1] = second;
+
+	return GESTURE_STATE_UNKNOWN;
+}
+
+
+static enum tp_gesture_state
+tp_gesture_handle_state_unknown(struct tp_dispatch *tp, uint64_t time)
+{
+	return tp_gesture_detect_motion_gestures(tp, time);
 }
 
 static enum tp_gesture_state
@@ -642,7 +658,7 @@ tp_gesture_handle_state_swipe(struct tp_dispatch *tp, uint64_t time)
 	delta = tp_filter_motion(tp, &raw, time);
 
 	if (!normalized_is_zero(delta) || !device_float_is_zero(raw)) {
-		unaccel = tp_normalize_delta(tp, raw);
+		unaccel = tp_filter_motion_unaccelerated(tp, &raw, time);
 		tp_gesture_start(tp, time);
 		gesture_notify_swipe(&tp->device->base, time,
 				     LIBINPUT_EVENT_GESTURE_SWIPE_UPDATE,
@@ -680,7 +696,7 @@ tp_gesture_handle_state_pinch(struct tp_dispatch *tp, uint64_t time)
 	    scale == tp->gesture.prev_scale && angle_delta == 0.0)
 		return GESTURE_STATE_PINCH;
 
-	unaccel = tp_normalize_delta(tp, fdelta);
+	unaccel = tp_filter_motion_unaccelerated(tp, &fdelta, time);
 	tp_gesture_start(tp, time);
 	gesture_notify_pinch(&tp->device->base, time,
 			     LIBINPUT_EVENT_GESTURE_PINCH_UPDATE,

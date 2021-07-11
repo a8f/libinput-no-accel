@@ -43,8 +43,23 @@
 #include <xlocale.h>
 #endif
 
-#define streq(s1, s2) (strcmp((s1), (s2)) == 0)
-#define strneq(s1, s2, n) (strncmp((s1), (s2), (n)) == 0)
+static inline bool
+streq(const char *str1, const char *str2)
+{
+	/* one NULL, one not NULL is always false */
+	if (str1 && str2)
+		return strcmp(str1, str2) == 0;
+	return str1 == str2;
+}
+
+static inline bool
+strneq(const char *str1, const char *str2, int n)
+{
+	/* one NULL, one not NULL is always false */
+	if (str1 && str2)
+		return strncmp(str1, str2, n) == 0;
+	return str1 == str2;
+}
 
 static inline void *
 zalloc(size_t size)
@@ -105,6 +120,18 @@ xasprintf(char **strp, const char *fmt, ...)
 	va_start(args, fmt);
 	rc = vasprintf(strp, fmt, args);
 	va_end(args);
+	if ((rc == -1) && strp)
+		*strp = NULL;
+
+	return rc;
+}
+
+__attribute__ ((format (printf, 2, 0)))
+static inline int
+xvasprintf(char **strp, const char *fmt, va_list args)
+{
+	int rc = 0;
+	rc = vasprintf(strp, fmt, args);
 	if ((rc == -1) && strp)
 		*strp = NULL;
 
@@ -225,8 +252,9 @@ safe_atod(const char *str, double *val)
 	return true;
 }
 
-char **strv_from_string(const char *string, const char *separator);
-char *strv_join(char **strv, const char *separator);
+char **strv_from_argv(int argc, char **argv);
+char **strv_from_string(const char *in, const char *separator);
+char *strv_join(char **strv, const char *joiner);
 
 static inline void
 strv_free(char **strv) {
@@ -364,3 +392,9 @@ strstartswith(const char *str, const char *prefix)
 
 	return prefixlen > 0 ? strneq(str, prefix, strlen(prefix)) : false;
 }
+
+const char *
+safe_basename(const char *filename);
+
+char *
+trunkname(const char *filename);

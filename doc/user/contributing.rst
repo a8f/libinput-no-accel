@@ -28,7 +28,7 @@ behaviour is not tolerated by the project.
 Contact
 ------------------------------------------------------------------------------
 
-Questions can be asked on ``#wayland-devel`` on freenode or on the
+Questions can be asked on ``#wayland`` on freenode or on the
 `wayland-devel@lists.freedesktop.org
 <https://lists.freedesktop.org/mailman/listinfo/wayland-devel>`_ mailing
 list.
@@ -50,7 +50,7 @@ If you don't already know what you want to improve or fix with libinput,
 then a good way of finding something is to search for the ``help needed``
 tag in our `issue tracker <https://gitlab.freedesktop.org/libinput/libinput/issues?label_name%5B%5D=help+needed>`_.
 These are issues that have been triaged to some degree and deemed to be a
-possible future feature to libinput. 
+possible future feature to libinput.
 
 .. note:: Some of these issue may require specific hardware to reproduce.
 
@@ -79,11 +79,11 @@ You can omit the last step if you only want to test locally.
 Working on the code
 ------------------------------------------------------------------------------
 
-libinput has a roughly three-parts architecture: 
+libinput has a roughly three-parts architecture:
 
 -  the front-end code which handles the ``libinput_some_function()`` API calls in ``libinput.c``
 -  the generic evdev interface handling which maps those API calls to the
-   backend calls (``evdev.c``). 
+   backend calls (``evdev.c``).
 - there are device-specific backends which do most of the actual work -
   ``evdev-mt-touchpad.c`` is the one for touchpads for example.
 
@@ -149,32 +149,75 @@ Any patches should be sent via a Merge Request (see the `GitLab docs
 in the `libinput GitLab instance hosted by freedesktop.org
 <https://gitlab.freedesktop.org/libinput/libinput>`_.
 
-To submit a merge request, you need to
+Below are the steps required to submit a merge request. They do not
+replace `learning git <https://git-scm.com/doc>`__ but they should be
+sufficient to make some of the more confusing steps obvious.
 
 - `Register an account <https://gitlab.freedesktop.org/users/sign_in>`_ in
   the freedesktop.org GitLab instance.
 - `Fork libinput <https://gitlab.freedesktop.org/libinput/libinput/forks/new>`_
   into your username's namespace
-- Get libinput's main repository: ::
+- Get libinput's main repository. git will call this repository ``origin``. ::
 
     git clone https://gitlab.freedesktop.org/libinput/libinput.git
 
 - Add the forked git repository to your remotes (replace ``USERNAME``
-  with your username): ::
+  with your username). git will call this repository ``gitlab``. ::
 
     cd /path/to/libinput.git
     git remote add gitlab git@gitlab.freedesktop.org:USERNAME/libinput.git
     git fetch gitlab
 
-- Push your changes to your fork: ::
+- Create a new branch and commit your changes to that branch. ::
 
-    git push gitlab BRANCHNAME
+    git switch -C mynewbranch
+    # edit files, make changes
+    git add file1 file2
+    git commit -s
+    # edit commit message in the editor
 
-- Submit a merge request. The URL for a merge request is: ::
+  Replace ``mynewbranch`` (here and in the commands below) with a meaningful
+  name. See :ref:`contributing_commit_messages` for details on the commit
+  message format.
+
+- Push your changes to your fork and submit a merge request ::
+
+    git push gitlab mynewbranch
+
+  This command will print the URL to file a merge request, you then only
+  have to click through. Alternatively you can go to:
 
     https://gitlab.freedesktop.org/USERNAME/libinput/merge_requests
 
   Select your branch name to merge and ``libinput/libinput`` ``master`` as target branch.
+
+- Verify that the CI completes successfully by visiting the merge request
+  page. A successful pipeline shows only green ticks, failure is indicated
+  by a red cross or a yellow exclamation mark (see
+  the `GitLab Docs
+  <https://docs.gitlab.com/ee/ci/pipelines/#pipeline-mini-graphs>`__). For
+  details about the failures, click on the failed jobs in the pipelines
+  and/or click the ``Expand`` button in the box for the test summaries.
+
+  A merge request without a successful pipeline may never be looked at by a
+  maintainer.
+
+- If changes are requested by the maintainers, please **amend** the
+  commit(s) and **force-push** the updated branch. ::
+
+    # edits in file foo.c
+    git add foo.c
+    git commit --amend
+    git push -f gitlab mynewbranch
+
+  A force-push will re-trigger the CI and notify the merge request that new
+  changes are available.
+
+  If the branch contains more than one commit, please look at
+  `git interactive rebases
+  <https://git-scm.com/book/en/v2/Git-Tools-Rewriting-History>`__
+  to learn how to change multiple commits, or squash new changes into older
+  commits.
 
 ------------------------------------------------------------------------------
 Commit History
@@ -214,6 +257,8 @@ describes the change. For example: ::
 
 If in doubt what prefix to use, look at other commits that change the
 same file(s) as the patch being sent.
+
+.. _contributing_commit_messages:
 
 ------------------------------------------------------------------------------
 Commit Messages

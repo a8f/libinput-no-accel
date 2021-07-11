@@ -6,7 +6,7 @@ Device quirks
 
 libinput requires extra information from devices that is not always readily
 available. For example, some touchpads are known to have jumping cursors
-under specific conditions. libinput ships a set of files containting the
+under specific conditions. libinput ships a set of files containing the
 so-called model quirks to provide that information. Model quirks are usually
 installed under ``/usr/share/libinput/<filename>.quirks`` and are standard
 ``.ini`` files. A file may contain multiple section headers (``[some
@@ -157,7 +157,7 @@ AttrTouchSizeRange=N:M, AttrPalmSizeThreshold=O
     Specifies the touch size required to trigger a press (N) and to trigger
     a release (M). O > N > M. See :ref:`touchpad_touch_size_hwdb` for more
     details.
-AttrTouchPressureRange=N:M, AttrPalmPressureThreshold=O, AttrThumbPressureThreshold=P
+AttrPressureRange=N:M, AttrPalmPressureThreshold=O, AttrThumbPressureThreshold=P
     Specifies the touch pressure required to trigger a press (N) and to
     trigger a release (M), when a palm touch is triggered (O) and when a
     thumb touch is triggered (P). O > P > N > M. See
@@ -177,6 +177,16 @@ AttrEventCodeDisable=EV_ABS;BTN_STYLUS;EV_KEY:0x123;
     Disables the evdev event type/code tuples on the device. Entries may be
     a named event type, or a named event code, or a named event type with a
     hexadecimal event code, separated by a single colon.
+AttrEventCodeEnable=EV_ABS;BTN_STYLUS;EV_KEY:0x123;
+    Enables the evdev event type/code tuples on the device. Entries may be
+    a named event type, or a named event code, or a named event type with a
+    hexadecimal event code, separated by a single colon.
+AttrInputPropDisable=INPUT_PROP_BUTTONPAD;INPUT_PROP_POINTER;
+    Disables the evdev input property on the device. Entries may be
+    a named input property or the hexadecimal value of that property.
+AttrInputPropEnable=INPUT_PROP_BUTTONPAD;INPUT_PROP_POINTER;
+    Enables the evdev input property on the device. Entries may be
+    a named input property or the hexadecimal value of that property.
 AttrPointingStickIntegration=internal|external
     Indicates the integration of the pointing stick. This is a string enum.
     Only needed for external pointing sticks. These are rare.

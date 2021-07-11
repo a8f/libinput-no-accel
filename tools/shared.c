@@ -43,6 +43,15 @@
 #include "util-macros.h"
 #include "util-strings.h"
 
+static uint32_t dispatch_counter = 0;
+
+void
+tools_dispatch(struct libinput *libinput)
+{
+	dispatch_counter++;
+	libinput_dispatch(libinput);
+}
+
 LIBINPUT_ATTRIBUTE_PRINTF(3, 0)
 static void
 log_handler(struct libinput *li,
@@ -51,20 +60,38 @@ log_handler(struct libinput *li,
 	    va_list args)
 {
 	static int is_tty = -1;
+	static uint32_t last_dispatch_no = 0;
+	static bool color_toggle = false;
 
 	if (is_tty == -1)
 		is_tty = isatty(STDOUT_FILENO);
 
 	if (is_tty) {
-		if (priority >= LIBINPUT_LOG_PRIORITY_ERROR)
+		if (priority >= LIBINPUT_LOG_PRIORITY_ERROR) {
 			printf(ANSI_RED);
-		else if (priority >= LIBINPUT_LOG_PRIORITY_INFO)
+		} else if (priority >= LIBINPUT_LOG_PRIORITY_INFO) {
 			printf(ANSI_HIGHLIGHT);
+		} else if (priority == LIBINPUT_LOG_PRIORITY_DEBUG) {
+			if (dispatch_counter != last_dispatch_no)
+				color_toggle = !color_toggle;
+			uint8_t r = 0,
+				g = 135,
+				b = 95 + (color_toggle ? 80 :0);
+			printf("\x1B[38;2;%u;%u;%um", r, g, b);
+		}
 	}
 
+	if (priority < LIBINPUT_LOG_PRIORITY_INFO) {
+		if (dispatch_counter != last_dispatch_no) {
+			last_dispatch_no = dispatch_counter;
+			printf("%4u: ", dispatch_counter);
+		} else {
+			printf(" %4s ", "...");
+		}
+	}
 	vprintf(format, args);
 
-	if (is_tty && priority >= LIBINPUT_LOG_PRIORITY_INFO)
+	if (is_tty)
 		printf(ANSI_NORMAL);
 }
 
@@ -437,13 +464,16 @@ static char*
 find_device(const char *udev_tag)
 {
 	struct udev *udev;
-	struct udev_enumerate *e;
+	struct udev_enumerate *e = NULL;
 	struct udev_list_entry *entry = NULL;
 	struct udev_device *device;
 	const char *path, *sysname;
 	char *device_node = NULL;
 
 	udev = udev_new();
+	if (!udev)
+		goto out;
+
 	e = udev_enumerate_new(udev);
 	udev_enumerate_add_match_subsystem(e, "input");
 	udev_enumerate_scan_devices(e);
@@ -455,7 +485,7 @@ find_device(const char *udev_tag)
 			continue;
 
 		sysname = udev_device_get_sysname(device);
-		if (strncmp("event", sysname, 5) != 0) {
+		if (!strneq("event", sysname, 5)) {
 			udev_device_unref(device);
 			continue;
 		}
@@ -468,6 +498,7 @@ find_device(const char *udev_tag)
 		if (device_node)
 			break;
 	}
+out:
 	udev_enumerate_unref(e);
 	udev_unref(udev);
 
@@ -499,6 +530,9 @@ is_touchpad_device(const char *devnode)
 		return false;
 
 	udev = udev_new();
+	if (!udev)
+		goto out;
+
 	dev = udev_device_new_from_devnum(udev, 'c', st.st_rdev);
 	if (!dev)
 		goto out;
@@ -564,27 +598,26 @@ tools_exec_command(const char *prefix, int real_argc, char **real_argv)
 				"libinput: %s is not installed\n",
 				command);
 			return EXIT_INVALID_USAGE;
-		} else {
-			fprintf(stderr,
-				"Failed to execute '%s' (%s)\n",
-				command,
-				strerror(errno));
 		}
+		fprintf(stderr,
+			"Failed to execute '%s' (%s)\n",
+			command,
+			strerror(errno));
 	}
 
 	return EXIT_FAILURE;
 }
 
 static void
-sprintf_event_codes(char *buf, size_t sz, struct quirks *quirks)
+sprintf_event_codes(char *buf, size_t sz, struct quirks *quirks, enum quirk q)
 {
 	const struct quirk_tuples *t;
 	size_t off = 0;
 	int printed;
 	const char *name;
 
-	quirks_get_tuples(quirks, QUIRK_ATTR_EVENT_CODE_DISABLE, &t);
-	name = quirk_get_name(QUIRK_ATTR_EVENT_CODE_DISABLE);
+	quirks_get_tuples(quirks, q, &t);
+	name = quirk_get_name(q);
 	printed = snprintf(buf, sz, "%s=", name);
 	assert(printed != -1);
 	off += printed;
@@ -594,6 +627,29 @@ sprintf_event_codes(char *buf, size_t sz, struct quirks *quirks)
 						t->tuples[i].first,
 						t->tuples[i].second);
 
+		printed = snprintf(buf + off, sz - off, "%s;", name);
+		assert(printed != -1);
+		off += printed;
+	}
+}
+
+static void
+sprintf_input_props(char *buf, size_t sz, struct quirks *quirks, enum quirk q)
+{
+	const uint32_t *properties;
+	size_t nprops = 0;
+	size_t off = 0;
+	int printed;
+	const char *name;
+
+	quirks_get_uint32_array(quirks, q, &properties, &nprops);
+	name = quirk_get_name(q);
+	printed = snprintf(buf, sz, "%s=", name);
+	assert(printed != -1);
+	off += printed;
+
+	for (size_t i = 0; off < sz && i < nprops; i++) {
+		const char *name = libevdev_property_get_name(properties[i]);
 		printed = snprintf(buf + off, sz - off, "%s;", name);
 		assert(printed != -1);
 		off += printed;
@@ -680,7 +736,13 @@ tools_list_device_quirks(struct quirks_context *ctx,
 				callback(userdata, buf);
 				break;
 			case QUIRK_ATTR_EVENT_CODE_DISABLE:
-				sprintf_event_codes(buf, sizeof(buf), quirks);
+			case QUIRK_ATTR_EVENT_CODE_ENABLE:
+				sprintf_event_codes(buf, sizeof(buf), quirks, q);
+				callback(userdata, buf);
+				break;
+			case QUIRK_ATTR_INPUT_PROP_DISABLE:
+			case QUIRK_ATTR_INPUT_PROP_ENABLE:
+				sprintf_input_props(buf, sizeof(buf), quirks, q);
 				callback(userdata, buf);
 				break;
 			default:

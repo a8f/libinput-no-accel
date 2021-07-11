@@ -163,12 +163,35 @@ __all_seats()
 		':device:_files -W /dev/input/ -P /dev/input/'
 }
 
+(( $+functions[_libinput_analyze_per-slot-delta] )) || _libinput_analyze_per-slot-delta()
+{
+	_arguments \
+		'--help[Show help message and exit]' \
+		':recording:_files'
+}
+
+(( $+functions[_libinput_analyze_touch-down-state] )) || _libinput_analyze_touch-down-state()
+{
+	_arguments \
+		'--help[Show help message and exit]' \
+		':recording:_files'
+}
+
+(( $+functions[_libinput_analyze_recording] )) || _libinput_analyze_recording()
+{
+	_arguments \
+		'--help[Show help message and exit]' \
+		':recording:_files'
+}
+
 (( $+functions[_libinput_analyze] )) || _libinput_analyze()
 {
 	local curcontext=$curcontext state line ret=1
 	local features
 	features=(
 		"per-slot-delta:analyze relative movement per touch per slot"
+		"recording:analyze a recording by printing a pretty table"
+		"touch-down-state:analyze a recording for logical touch down states"
 	)
 
 	_arguments -C \
@@ -196,7 +219,7 @@ __all_seats()
 		'--help[Show help message and exit]' \
 		'--all[Record all /dev/input/event* devices available on the system]' \
 		'--autorestart=[Terminate the current recording after s seconds of device inactivity]' \
-		{-o+,--output=}'[Speficy the output file to use]:file:_files -g "*.yml"' \
+		{-o+,--output=}'[Specify the output file to use]:file:_files -g "*.yml"' \
 		'--multiple[Record multiple devices at once]' \
 		'--show-keycodes[Show keycodes as-is in the recording]' \
 		'--with-libinput[Record libinput events alongside device events]' \

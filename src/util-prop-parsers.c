@@ -249,7 +249,7 @@ parse_tpkbcombo_layout_poperty(const char *prop,
 
 /**
  * Parses a string of the format "a:b" where both a and b must be integer
- * numbers and a > b. Also allowed is the special string vaule "none" which
+ * numbers and a > b. Also allowed is the special string value "none" which
  * amounts to unsetting the property.
  *
  * @param prop The value of the property
@@ -395,6 +395,63 @@ parse_evcode_property(const char *prop, struct input_event *events, size_t *neve
 
 	memcpy(events, evs, ncodes * sizeof *events);
 	*nevents = ncodes;
+	rc = true;
+
+out:
+	strv_free(strv);
+	return rc;
+}
+
+/**
+ * Parses a string of the format "INPUT_PROP_BUTTONPAD;INPUT_PROP_POINTER;0x123;"
+ * where each element must be a named input prop OR a hexcode in the form
+ * 0x1234
+ *
+ * props must point to an existing array of size nprops.
+ * nprops specifies the size of the array in props and returns the number
+ * of elements, elements exceeding nprops are simply ignored, just make sure
+ * props is large enough for your use-case.
+ *
+ * On success, props contains nprops elements.
+ */
+bool
+parse_input_prop_property(const char *prop, unsigned int *props_out, size_t *nprops)
+{
+	char **strv = NULL;
+	bool rc = false;
+	size_t count = 0;
+	size_t idx;
+	unsigned int props[INPUT_PROP_CNT]; /* doubling up on quirks is a bug */
+
+	strv = strv_from_string(prop, ";");
+	if (!strv)
+		goto out;
+
+	for (idx = 0; strv[idx]; idx++)
+		count++;
+
+	if (count == 0 || count > ARRAY_LENGTH(props))
+		goto out;
+
+	count = min(*nprops, count);
+	for (idx = 0; strv[idx]; idx++) {
+		char *s = strv[idx];
+		unsigned int prop;
+
+		if (safe_atou_base(s, &prop, 16)) {
+			if (prop > INPUT_PROP_MAX)
+				goto out;
+		} else {
+			int val = libevdev_property_from_name(s);
+			if (val == -1)
+				goto out;
+			prop = (unsigned int)val;
+		}
+		props[idx] = prop;
+	}
+
+	memcpy(props_out, props, count * sizeof *props);
+	*nprops = count;
 	rc = true;
 
 out:

@@ -546,6 +546,52 @@ START_TEST(evcode_prop_parser)
 }
 END_TEST
 
+START_TEST(input_prop_parser)
+{
+	struct parser_test_val {
+		const char *prop;
+		bool success;
+		size_t nvals;
+		uint32_t values[20];
+	} tests[] = {
+		{ "INPUT_PROP_BUTTONPAD", true, 1, {INPUT_PROP_BUTTONPAD}},
+		{ "INPUT_PROP_BUTTONPAD;INPUT_PROP_POINTER", true, 2,
+			{ INPUT_PROP_BUTTONPAD,
+			  INPUT_PROP_POINTER }},
+		{ "INPUT_PROP_BUTTONPAD;0x00;0x03", true, 3,
+			{ INPUT_PROP_BUTTONPAD,
+			  INPUT_PROP_POINTER,
+			  INPUT_PROP_SEMI_MT }},
+		{ .prop = "", .success = false },
+		{ .prop = "0xff", .success = false },
+		{ .prop = "INPUT_PROP", .success = false },
+		{ .prop = "INPUT_PROP_FOO", .success = false },
+		{ .prop = "INPUT_PROP_FOO;INPUT_PROP_FOO", .success = false },
+		{ .prop = "INPUT_PROP_POINTER;INPUT_PROP_FOO", .success = false },
+		{ .prop = "none", .success = false },
+		{ .prop = NULL },
+	};
+	struct parser_test_val *t;
+
+	for (int i = 0; tests[i].prop; i++) {
+		bool success;
+		uint32_t props[32];
+		size_t nprops = ARRAY_LENGTH(props);
+
+		t = &tests[i];
+		success = parse_input_prop_property(t->prop, props, &nprops);
+		ck_assert(success == t->success);
+		if (!success)
+			continue;
+
+		ck_assert_int_eq(nprops, t->nvals);
+		for (size_t j = 0; j < t->nvals; j++) {
+			ck_assert_int_eq(t->values[j], props[j]);
+		}
+	}
+}
+END_TEST
+
 START_TEST(evdev_abs_parser)
 {
 	struct test {
@@ -976,6 +1022,44 @@ START_TEST(strsplit_test)
 }
 END_TEST
 
+START_TEST(strargv_test)
+{
+	struct argv_test {
+		int argc;
+		char *argv[10];
+		int expected;
+	} tests[] = {
+		{ 0, {NULL}, 0 },
+		{ 1, {"hello", "World"}, 1 },
+		{ 2, {"hello", "World"}, 2 },
+		{ 2, {"", " "}, 2 },
+		{ 2, {"", NULL}, 0 },
+		{ 2, {NULL, NULL}, 0 },
+		{ 1, {NULL, NULL}, 0 },
+		{ 3, {"hello", NULL, "World"}, 0 },
+	};
+	struct argv_test *t;
+
+	ARRAY_FOR_EACH(tests, t) {
+		char **strv = strv_from_argv(t->argc, t->argv);
+
+		if (t->expected == 0) {
+			ck_assert(strv == NULL);
+		} else {
+			int count = 0;
+			char **s = strv;
+			while (*s) {
+				ck_assert_str_eq(*s, t->argv[count]);
+				count++;
+				s++;
+			}
+			ck_assert_int_eq(t->expected, count);
+			strv_free(strv);
+		}
+	}
+}
+END_TEST
+
 START_TEST(kvsplit_double_test)
 {
 	struct kvsplit_dbl_test {
@@ -1224,6 +1308,84 @@ START_TEST(strverscmp_test)
 }
 END_TEST
 
+START_TEST(streq_test)
+{
+	ck_assert(streq("", "") == true);
+	ck_assert(streq(NULL, NULL) == true);
+	ck_assert(streq("0.0.1", "") == false);
+	ck_assert(streq("foo", NULL) == false);
+	ck_assert(streq(NULL, "foo") == false);
+	ck_assert(streq("0.0.1", "0.0.1") == true);
+}
+END_TEST
+
+START_TEST(strneq_test)
+{
+	ck_assert(strneq("", "", 1) == true);
+	ck_assert(strneq(NULL, NULL, 1) == true);
+	ck_assert(strneq("0.0.1", "", 6) == false);
+	ck_assert(strneq("foo", NULL, 5) == false);
+	ck_assert(strneq(NULL, "foo", 5) == false);
+	ck_assert(strneq("0.0.1", "0.0.1", 6) == true);
+}
+END_TEST
+
+START_TEST(basename_test)
+{
+	struct test {
+		const char *path;
+		const char *expected;
+	} tests[] = {
+		{ "a", "a" },
+		{ "foo.c", "foo.c" },
+		{ "foo", "foo" },
+		{ "/path/to/foo.h", "foo.h" },
+		{ "../bar.foo", "bar.foo" },
+		{ "./bar.foo.baz", "bar.foo.baz" },
+		{ "./", NULL },
+		{ "/", NULL },
+		{ "/bar/", NULL },
+		{ "/bar", "bar" },
+		{ "", NULL },
+	};
+	struct test *t;
+
+	ARRAY_FOR_EACH(tests, t) {
+		const char *result = safe_basename(t->path);
+		if (t->expected == NULL)
+			ck_assert(result == NULL);
+		else
+			ck_assert_str_eq(result, t->expected);
+	}
+}
+END_TEST
+START_TEST(trunkname_test)
+{
+	struct test {
+		const char *path;
+		const char *expected;
+	} tests[] = {
+		{ "foo.c", "foo" },
+		{ "/path/to/foo.h", "foo" },
+		{ "/path/to/foo", "foo" },
+		{ "../bar.foo", "bar" },
+		{ "./bar.foo.baz", "bar.foo" },
+		{ "./", "" },
+		{ "/", "" },
+		{ "/bar/", "" },
+		{ "/bar", "bar" },
+		{ "", "" },
+	};
+	struct test *t;
+
+	ARRAY_FOR_EACH(tests, t) {
+		char *result = trunkname(t->path);
+		ck_assert_str_eq(result, t->expected);
+		free(result);
+	}
+}
+END_TEST
+
 static Suite *
 litest_utils_suite(void)
 {
@@ -1244,6 +1406,7 @@ litest_utils_suite(void)
 	tcase_add_test(tc, calibration_prop_parser);
 	tcase_add_test(tc, range_prop_parser);
 	tcase_add_test(tc, evcode_prop_parser);
+	tcase_add_test(tc, input_prop_parser);
 	tcase_add_test(tc, evdev_abs_parser);
 	tcase_add_test(tc, safe_atoi_test);
 	tcase_add_test(tc, safe_atoi_base_16_test);
@@ -1253,6 +1416,7 @@ litest_utils_suite(void)
 	tcase_add_test(tc, safe_atou_base_8_test);
 	tcase_add_test(tc, safe_atod_test);
 	tcase_add_test(tc, strsplit_test);
+	tcase_add_test(tc, strargv_test);
 	tcase_add_test(tc, kvsplit_double_test);
 	tcase_add_test(tc, strjoin_test);
 	tcase_add_test(tc, strstrip_test);
@@ -1264,6 +1428,10 @@ litest_utils_suite(void)
 	tcase_add_test(tc, list_test_insert);
 	tcase_add_test(tc, list_test_append);
 	tcase_add_test(tc, strverscmp_test);
+	tcase_add_test(tc, streq_test);
+	tcase_add_test(tc, strneq_test);
+	tcase_add_test(tc, trunkname_test);
+	tcase_add_test(tc, basename_test);
 
 	suite_add_tcase(s, tc);
 

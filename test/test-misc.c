@@ -657,7 +657,8 @@ static void timer_offset_warning(struct libinput *libinput,
 				 const char *format,
 				 va_list args)
 {
-	int *warning_triggered = (int*)libinput_get_user_data(libinput);
+	struct litest_user_data *user_data = libinput_get_user_data(libinput);
+	int *warning_triggered = user_data->private;
 
 	if (priority == LIBINPUT_LOG_PRIORITY_ERROR &&
 	    strstr(format, "scheduled expiry is in the past"))
@@ -669,7 +670,7 @@ START_TEST(timer_offset_bug_warning)
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 	int warning_triggered = 0;
-	void *old_user_data;
+	struct litest_user_data *user_data = libinput_get_user_data(li);
 
 	litest_enable_tap(dev->libinput_device);
 	litest_drain_events(li);
@@ -679,16 +680,13 @@ START_TEST(timer_offset_bug_warning)
 
 	litest_timeout_tap();
 
-	old_user_data = libinput_get_user_data(li);
-	libinput_set_user_data(li, &warning_triggered);
+	user_data->private = &warning_triggered;
 	libinput_log_set_handler(li, timer_offset_warning);
 	libinput_dispatch(li);
 
 	/* triggered for touch down and touch up */
 	ck_assert_int_eq(warning_triggered, 2);
 	litest_restore_log_handler(li);
-
-	libinput_set_user_data(li, old_user_data);
 }
 END_TEST
 
@@ -697,39 +695,35 @@ static void timer_delay_warning(struct libinput *libinput,
 				const char *format,
 				va_list args)
 {
-	int *warning_triggered = (int*)libinput_get_user_data(libinput);
+	struct litest_user_data *user_data = libinput_get_user_data(libinput);
+	int *warning_triggered = user_data->private;
 
 	if (priority == LIBINPUT_LOG_PRIORITY_ERROR &&
 	    strstr(format, "event processing lagging behind by"))
 		(*warning_triggered)++;
 }
 
-
 START_TEST(timer_delay_bug_warning)
 {
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
 	int warning_triggered = 0;
-	void *old_user_data;
+	struct litest_user_data *user_data = libinput_get_user_data(li);
 
-	old_user_data = libinput_get_user_data(li);
 	litest_drain_events(li);
 
-	for (int i = 0; i < 10; i++) {
-		litest_button_click(dev, BTN_LEFT, true);
-		libinput_dispatch(li);
-		litest_button_click(dev, BTN_LEFT, false);
-		msleep(11);
+	user_data->private = &warning_triggered;
+	libinput_log_set_handler(li, timer_delay_warning);
 
-		libinput_set_user_data(li, &warning_triggered);
-		libinput_log_set_handler(li, timer_delay_warning);
+	for (int i = 0; i < 20; i++) {
+		litest_event(dev, EV_REL, REL_X, -1);
+		litest_event(dev, EV_SYN, SYN_REPORT, 0);
+		msleep(11);
 		libinput_dispatch(li);
 	}
 
-
 	ck_assert_int_ge(warning_triggered, 1);
 	litest_restore_log_handler(li);
-	libinput_set_user_data(li, old_user_data);
 }
 END_TEST
 
@@ -771,7 +765,7 @@ START_TEST(timer_flush)
 	libinput_dispatch(li);
 	litest_assert_only_typed_events(li, LIBINPUT_EVENT_KEYBOARD_KEY);
 
-	/* Ingore 'timer offset negative' warnings */
+	/* Ignore 'timer offset negative' warnings */
 	litest_disable_log_handler(li);
 
 	/* now mess with the timing
@@ -886,25 +880,24 @@ END_TEST
 
 TEST_COLLECTION(misc)
 {
-	litest_add_no_device("events:conversion", event_conversion_device_notify);
-	litest_add_for_device("events:conversion", event_conversion_pointer, LITEST_MOUSE);
-	litest_add_for_device("events:conversion", event_conversion_pointer, LITEST_MOUSE);
-	litest_add_for_device("events:conversion", event_conversion_pointer_abs, LITEST_XEN_VIRTUAL_POINTER);
-	litest_add_for_device("events:conversion", event_conversion_key, LITEST_KEYBOARD);
-	litest_add_for_device("events:conversion", event_conversion_touch, LITEST_WACOM_TOUCH);
-	litest_add_for_device("events:conversion", event_conversion_gesture, LITEST_BCM5974);
-	litest_add_for_device("events:conversion", event_conversion_tablet, LITEST_WACOM_CINTIQ);
-	litest_add_for_device("events:conversion", event_conversion_tablet_pad, LITEST_WACOM_INTUOS5_PAD);
-	litest_add_for_device("events:conversion", event_conversion_switch, LITEST_LID_SWITCH);
+	litest_add_no_device(event_conversion_device_notify);
+	litest_add_for_device(event_conversion_pointer, LITEST_MOUSE);
+	litest_add_for_device(event_conversion_pointer_abs, LITEST_XEN_VIRTUAL_POINTER);
+	litest_add_for_device(event_conversion_key, LITEST_KEYBOARD);
+	litest_add_for_device(event_conversion_touch, LITEST_WACOM_TOUCH);
+	litest_add_for_device(event_conversion_gesture, LITEST_BCM5974);
+	litest_add_for_device(event_conversion_tablet, LITEST_WACOM_CINTIQ);
+	litest_add_for_device(event_conversion_tablet_pad, LITEST_WACOM_INTUOS5_PAD);
+	litest_add_for_device(event_conversion_switch, LITEST_LID_SWITCH);
 
-	litest_add_deviceless("context:refcount", context_ref_counting);
-	litest_add_deviceless("config:status string", config_status_string);
+	litest_add_deviceless(context_ref_counting);
+	litest_add_deviceless(config_status_string);
 
-	litest_add_for_device("timer:offset-warning", timer_offset_bug_warning, LITEST_SYNAPTICS_TOUCHPAD);
-	litest_add_for_device("timer:delay-warning", timer_delay_bug_warning, LITEST_MOUSE);
-	litest_add_no_device("timer:flush", timer_flush);
+	litest_add_for_device(timer_offset_bug_warning, LITEST_SYNAPTICS_TOUCHPAD);
+	litest_add_for_device(timer_delay_bug_warning, LITEST_MOUSE);
+	litest_add_no_device(timer_flush);
 
-	litest_add_no_device("misc:fd", fd_no_event_leak);
+	litest_add_no_device(fd_no_event_leak);
 
-	litest_add_for_device("misc:system", udev_absinfo_override, LITEST_ABSINFO_OVERRIDE);
+	litest_add_for_device(udev_absinfo_override, LITEST_ABSINFO_OVERRIDE);
 }

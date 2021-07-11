@@ -378,11 +378,13 @@ struct libinput_tablet_tool {
 	int refcount;
 	void *user_data;
 
-	/* The pressure threshold assumes a pressure_offset of 0 */
-	struct threshold pressure_threshold;
-	/* pressure_offset includes axis->minimum */
-	int pressure_offset;
-	bool has_pressure_offset;
+	struct {
+		/* The pressure threshold assumes a pressure_offset of 0 */
+		struct threshold threshold;
+		/* pressure_offset includes axis->minimum */
+		int offset;
+		bool has_offset;
+	} pressure;
 };
 
 struct libinput_tablet_pad_mode_group {
@@ -606,7 +608,7 @@ void
 gesture_notify_swipe_end(struct libinput_device *device,
 			 uint64_t time,
 			 int finger_count,
-			 int cancelled);
+			 bool cancelled);
 
 void
 gesture_notify_pinch(struct libinput_device *device,
@@ -623,7 +625,7 @@ gesture_notify_pinch_end(struct libinput_device *device,
 			 uint64_t time,
 			 int finger_count,
 			 double scale,
-			 int cancelled);
+			 bool cancelled);
 
 void
 tablet_notify_axis(struct libinput_device *device,

@@ -143,17 +143,21 @@ is_inside_top_middle_area(const struct tp_dispatch *tp,
 }
 
 static void
-tp_button_set_enter_timer(struct tp_dispatch *tp, struct tp_touch *t)
+tp_button_set_enter_timer(struct tp_dispatch *tp,
+			  struct tp_touch *t,
+			  uint64_t time)
 {
 	libinput_timer_set(&t->button.timer,
-			   t->time + DEFAULT_BUTTON_ENTER_TIMEOUT);
+			   time + DEFAULT_BUTTON_ENTER_TIMEOUT);
 }
 
 static void
-tp_button_set_leave_timer(struct tp_dispatch *tp, struct tp_touch *t)
+tp_button_set_leave_timer(struct tp_dispatch *tp,
+			  struct tp_touch *t,
+			  uint64_t time)
 {
 	libinput_timer_set(&t->button.timer,
-			   t->time + DEFAULT_BUTTON_LEAVE_TIMEOUT);
+			   time + DEFAULT_BUTTON_LEAVE_TIMEOUT);
 }
 
 /*
@@ -164,7 +168,8 @@ static void
 tp_button_set_state(struct tp_dispatch *tp,
 		    struct tp_touch *t,
 		    enum button_state new_state,
-		    enum button_event event)
+		    enum button_event event,
+		    uint64_t time)
 {
 	libinput_timer_cancel(&t->button.timer);
 
@@ -184,10 +189,10 @@ tp_button_set_state(struct tp_dispatch *tp,
 		break;
 	case BUTTON_STATE_TOP_NEW:
 		t->button.current = event;
-		tp_button_set_enter_timer(tp, t);
+		tp_button_set_enter_timer(tp, t, time);
 		break;
 	case BUTTON_STATE_TOP_TO_IGNORE:
-		tp_button_set_leave_timer(tp, t);
+		tp_button_set_leave_timer(tp, t, time);
 		break;
 	case BUTTON_STATE_IGNORE:
 		t->button.current = 0;
@@ -198,24 +203,25 @@ tp_button_set_state(struct tp_dispatch *tp,
 static void
 tp_button_none_handle_event(struct tp_dispatch *tp,
 			    struct tp_touch *t,
-			    enum button_event event)
+			    enum button_event event,
+			    uint64_t time)
 {
 	switch (event) {
 	case BUTTON_EVENT_IN_BOTTOM_R:
 	case BUTTON_EVENT_IN_BOTTOM_M:
 	case BUTTON_EVENT_IN_BOTTOM_L:
-		tp_button_set_state(tp, t, BUTTON_STATE_BOTTOM, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_BOTTOM, event, time);
 		break;
 	case BUTTON_EVENT_IN_TOP_R:
 	case BUTTON_EVENT_IN_TOP_M:
 	case BUTTON_EVENT_IN_TOP_L:
-		tp_button_set_state(tp, t, BUTTON_STATE_TOP_NEW, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_TOP_NEW, event, time);
 		break;
 	case BUTTON_EVENT_IN_AREA:
-		tp_button_set_state(tp, t, BUTTON_STATE_AREA, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_AREA, event, time);
 		break;
 	case BUTTON_EVENT_UP:
-		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event, time);
 		break;
 	case BUTTON_EVENT_PRESS:
 	case BUTTON_EVENT_RELEASE:
@@ -227,7 +233,8 @@ tp_button_none_handle_event(struct tp_dispatch *tp,
 static void
 tp_button_area_handle_event(struct tp_dispatch *tp,
 			    struct tp_touch *t,
-			    enum button_event event)
+			    enum button_event event,
+			    uint64_t time)
 {
 	switch (event) {
 	case BUTTON_EVENT_IN_BOTTOM_R:
@@ -239,7 +246,7 @@ tp_button_area_handle_event(struct tp_dispatch *tp,
 	case BUTTON_EVENT_IN_AREA:
 		break;
 	case BUTTON_EVENT_UP:
-		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event, time);
 		break;
 	case BUTTON_EVENT_PRESS:
 	case BUTTON_EVENT_RELEASE:
@@ -281,7 +288,8 @@ tp_button_release_other_bottom_touches(struct tp_dispatch *tp,
 static void
 tp_button_bottom_handle_event(struct tp_dispatch *tp,
 			      struct tp_touch *t,
-			      enum button_event event)
+			      enum button_event event,
+			      uint64_t time)
 {
 	switch (event) {
 	case BUTTON_EVENT_IN_BOTTOM_R:
@@ -291,13 +299,14 @@ tp_button_bottom_handle_event(struct tp_dispatch *tp,
 			tp_button_set_state(tp,
 					    t,
 					    BUTTON_STATE_BOTTOM,
-					    event);
+					    event,
+					    time);
 		break;
 	case BUTTON_EVENT_IN_TOP_R:
 	case BUTTON_EVENT_IN_TOP_M:
 	case BUTTON_EVENT_IN_TOP_L:
 	case BUTTON_EVENT_IN_AREA:
-		tp_button_set_state(tp, t, BUTTON_STATE_AREA, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_AREA, event, time);
 
 		/* We just transitioned one finger from BOTTOM to AREA,
 		 * if there are other fingers in BOTTOM that started
@@ -308,7 +317,7 @@ tp_button_bottom_handle_event(struct tp_dispatch *tp,
 						       t->button.initial_time);
 		break;
 	case BUTTON_EVENT_UP:
-		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event, time);
 		break;
 	case BUTTON_EVENT_PRESS:
 	case BUTTON_EVENT_RELEASE:
@@ -320,13 +329,14 @@ tp_button_bottom_handle_event(struct tp_dispatch *tp,
 static void
 tp_button_top_handle_event(struct tp_dispatch *tp,
 			   struct tp_touch *t,
-			   enum button_event event)
+			   enum button_event event,
+			   uint64_t time)
 {
 	switch (event) {
 	case BUTTON_EVENT_IN_BOTTOM_R:
 	case BUTTON_EVENT_IN_BOTTOM_M:
 	case BUTTON_EVENT_IN_BOTTOM_L:
-		tp_button_set_state(tp, t, BUTTON_STATE_TOP_TO_IGNORE, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_TOP_TO_IGNORE, event, time);
 		break;
 	case BUTTON_EVENT_IN_TOP_R:
 	case BUTTON_EVENT_IN_TOP_M:
@@ -335,13 +345,14 @@ tp_button_top_handle_event(struct tp_dispatch *tp,
 			tp_button_set_state(tp,
 					    t,
 					    BUTTON_STATE_TOP_NEW,
-					    event);
+					    event,
+					    time);
 		break;
 	case BUTTON_EVENT_IN_AREA:
-		tp_button_set_state(tp, t, BUTTON_STATE_TOP_TO_IGNORE, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_TOP_TO_IGNORE, event, time);
 		break;
 	case BUTTON_EVENT_UP:
-		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event, time);
 		break;
 	case BUTTON_EVENT_PRESS:
 	case BUTTON_EVENT_RELEASE:
@@ -353,13 +364,14 @@ tp_button_top_handle_event(struct tp_dispatch *tp,
 static void
 tp_button_top_new_handle_event(struct tp_dispatch *tp,
 			       struct tp_touch *t,
-			       enum button_event event)
+			       enum button_event event,
+			       uint64_t time)
 {
 	switch(event) {
 	case BUTTON_EVENT_IN_BOTTOM_R:
 	case BUTTON_EVENT_IN_BOTTOM_M:
 	case BUTTON_EVENT_IN_BOTTOM_L:
-		tp_button_set_state(tp, t, BUTTON_STATE_AREA, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_AREA, event, time);
 		break;
 	case BUTTON_EVENT_IN_TOP_R:
 	case BUTTON_EVENT_IN_TOP_M:
@@ -368,21 +380,22 @@ tp_button_top_new_handle_event(struct tp_dispatch *tp,
 			tp_button_set_state(tp,
 					    t,
 					    BUTTON_STATE_TOP_NEW,
-					    event);
+					    event,
+					    time);
 		break;
 	case BUTTON_EVENT_IN_AREA:
-		tp_button_set_state(tp, t, BUTTON_STATE_AREA, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_AREA, event, time);
 		break;
 	case BUTTON_EVENT_UP:
-		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event, time);
 		break;
 	case BUTTON_EVENT_PRESS:
-		tp_button_set_state(tp, t, BUTTON_STATE_TOP, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_TOP, event, time);
 		break;
 	case BUTTON_EVENT_RELEASE:
 		break;
 	case BUTTON_EVENT_TIMEOUT:
-		tp_button_set_state(tp, t, BUTTON_STATE_TOP, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_TOP, event, time);
 		break;
 	}
 }
@@ -390,7 +403,8 @@ tp_button_top_new_handle_event(struct tp_dispatch *tp,
 static void
 tp_button_top_to_ignore_handle_event(struct tp_dispatch *tp,
 				     struct tp_touch *t,
-				     enum button_event event)
+				     enum button_event event,
+				     uint64_t time)
 {
 	switch(event) {
 	case BUTTON_EVENT_IN_TOP_R:
@@ -400,12 +414,14 @@ tp_button_top_to_ignore_handle_event(struct tp_dispatch *tp,
 			tp_button_set_state(tp,
 					    t,
 					    BUTTON_STATE_TOP,
-					    event);
+					    event,
+					    time);
 		else
 			tp_button_set_state(tp,
 					    t,
 					    BUTTON_STATE_TOP_NEW,
-					    event);
+					    event,
+					    time);
 		break;
 	case BUTTON_EVENT_IN_BOTTOM_R:
 	case BUTTON_EVENT_IN_BOTTOM_M:
@@ -413,13 +429,13 @@ tp_button_top_to_ignore_handle_event(struct tp_dispatch *tp,
 	case BUTTON_EVENT_IN_AREA:
 		break;
 	case BUTTON_EVENT_UP:
-		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event, time);
 		break;
 	case BUTTON_EVENT_PRESS:
 	case BUTTON_EVENT_RELEASE:
 		break;
 	case BUTTON_EVENT_TIMEOUT:
-		tp_button_set_state(tp, t, BUTTON_STATE_IGNORE, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_IGNORE, event, time);
 		break;
 	}
 }
@@ -427,7 +443,8 @@ tp_button_top_to_ignore_handle_event(struct tp_dispatch *tp,
 static void
 tp_button_ignore_handle_event(struct tp_dispatch *tp,
 			      struct tp_touch *t,
-			      enum button_event event)
+			      enum button_event event,
+			      uint64_t time)
 {
 	switch (event) {
 	case BUTTON_EVENT_IN_BOTTOM_R:
@@ -439,7 +456,7 @@ tp_button_ignore_handle_event(struct tp_dispatch *tp,
 	case BUTTON_EVENT_IN_AREA:
 		break;
 	case BUTTON_EVENT_UP:
-		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event);
+		tp_button_set_state(tp, t, BUTTON_STATE_NONE, event, time);
 		break;
 	case BUTTON_EVENT_PRESS:
 		t->button.current = BUTTON_EVENT_IN_AREA;
@@ -461,25 +478,25 @@ tp_button_handle_event(struct tp_dispatch *tp,
 
 	switch(t->button.state) {
 	case BUTTON_STATE_NONE:
-		tp_button_none_handle_event(tp, t, event);
+		tp_button_none_handle_event(tp, t, event, time);
 		break;
 	case BUTTON_STATE_AREA:
-		tp_button_area_handle_event(tp, t, event);
+		tp_button_area_handle_event(tp, t, event, time);
 		break;
 	case BUTTON_STATE_BOTTOM:
-		tp_button_bottom_handle_event(tp, t, event);
+		tp_button_bottom_handle_event(tp, t, event, time);
 		break;
 	case BUTTON_STATE_TOP:
-		tp_button_top_handle_event(tp, t, event);
+		tp_button_top_handle_event(tp, t, event, time);
 		break;
 	case BUTTON_STATE_TOP_NEW:
-		tp_button_top_new_handle_event(tp, t, event);
+		tp_button_top_new_handle_event(tp, t, event, time);
 		break;
 	case BUTTON_STATE_TOP_TO_IGNORE:
-		tp_button_top_to_ignore_handle_event(tp, t, event);
+		tp_button_top_to_ignore_handle_event(tp, t, event, time);
 		break;
 	case BUTTON_STATE_IGNORE:
-		tp_button_ignore_handle_event(tp, t, event);
+		tp_button_ignore_handle_event(tp, t, event, time);
 		break;
 	}
 
@@ -794,7 +811,8 @@ tp_click_get_default_method(struct tp_dispatch *tp)
 
 	if (!tp->buttons.is_clickpad)
 		return LIBINPUT_CONFIG_CLICK_METHOD_NONE;
-	else if (evdev_device_has_model_quirk(device, QUIRK_MODEL_APPLE_TOUCHPAD))
+
+	if (evdev_device_has_model_quirk(device, QUIRK_MODEL_APPLE_TOUCHPAD))
 		return LIBINPUT_CONFIG_CLICK_METHOD_CLICKFINGER;
 
 	return LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS;
@@ -917,6 +935,38 @@ tp_init_middlebutton_emulation(struct tp_dispatch *tp,
 				want_config_option);
 }
 
+static bool
+tp_guess_clickpad(const struct tp_dispatch *tp, struct evdev_device *device)
+{
+	bool is_clickpad;
+	bool has_left = libevdev_has_event_code(device->evdev, EV_KEY, BTN_LEFT),
+	     has_right = libevdev_has_event_code(device->evdev, EV_KEY, BTN_RIGHT);
+
+	is_clickpad = libevdev_has_property(device->evdev, INPUT_PROP_BUTTONPAD);
+
+	/* A non-clickpad without a right button is a clickpad, assume the
+	 * kernel is wrong.
+	 * Exceptions here:
+	 * - The one-button Apple touchpad (discontinued in 2008) has a
+	 *   single physical button
+	 * - Wacom touch devices have neither left nor right buttons
+	 */
+	if (is_clickpad) {
+		if (has_right) {
+			evdev_log_bug_kernel(device,
+					     "clickpad with right button, assuming it is not a clickpad\n");
+			is_clickpad = false;
+		}
+	} else if (has_left && !has_right &&
+		   (tp->device->model_flags & EVDEV_MODEL_APPLE_TOUCHPAD_ONEBUTTON) == 0) {
+		evdev_log_bug_kernel(device,
+				     "missing right button, assuming it is a clickpad.\n");
+		is_clickpad = true;
+	}
+
+	return is_clickpad;
+}
+
 void
 tp_init_buttons(struct tp_dispatch *tp,
 		struct evdev_device *device)
@@ -925,22 +975,10 @@ tp_init_buttons(struct tp_dispatch *tp,
 	const struct input_absinfo *absinfo_x, *absinfo_y;
 	int i;
 
-	tp->buttons.is_clickpad = libevdev_has_property(device->evdev,
-							INPUT_PROP_BUTTONPAD);
+	tp->buttons.is_clickpad = tp_guess_clickpad(tp, device);
+
 	tp->buttons.has_topbuttons = libevdev_has_property(device->evdev,
 						        INPUT_PROP_TOPBUTTONPAD);
-
-	if (libevdev_has_event_code(device->evdev, EV_KEY, BTN_MIDDLE) ||
-	    libevdev_has_event_code(device->evdev, EV_KEY, BTN_RIGHT)) {
-		if (tp->buttons.is_clickpad)
-			evdev_log_bug_kernel(device,
-					     "clickpad advertising right button\n");
-	} else if (libevdev_has_event_code(device->evdev, EV_KEY, BTN_LEFT) &&
-		   !tp->buttons.is_clickpad &&
-		   libevdev_get_id_vendor(device->evdev) != VENDOR_ID_APPLE) {
-			evdev_log_bug_kernel(device,
-					     "non clickpad without right button?\n");
-	}
 
 	absinfo_x = device->abs.absinfo_x;
 	absinfo_y = device->abs.absinfo_y;
@@ -1123,8 +1161,9 @@ out:
 	case 0:
 	case 1: button = BTN_LEFT; break;
 	case 2: button = BTN_RIGHT; break;
+	case 3: button = BTN_MIDDLE; break;
 	default:
-		button = BTN_MIDDLE; break;
+		button = 0;
 		break;
 	}
 
@@ -1286,8 +1325,7 @@ tp_post_button_events(struct tp_dispatch *tp, uint64_t time)
 	if (tp->buttons.is_clickpad ||
 	    tp->device->model_flags & EVDEV_MODEL_APPLE_TOUCHPAD_ONEBUTTON)
 		return tp_post_clickpadbutton_buttons(tp, time);
-	else
-		return tp_post_physical_buttons(tp, time);
+	return tp_post_physical_buttons(tp, time);
 }
 
 bool

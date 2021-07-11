@@ -3,28 +3,127 @@
 #
 
 # We're happy to rebuild all containers when one changes.
-.default_tag: &default_tag '2020-07-22.0'
+.default_tag: &default_tag '2021-01-04.1'
 
 distributions:
   - name: fedora
     tag: *default_tag
     versions:
-      - '31'
       - '32'
+      - '33'
     want_qemu: true
     use_for_custom_build_tests: true
+    packages:
+      - git-core
+      - gcc
+      - gcc-c++
+      - pkgconf-pkg-config
+      - meson
+      - check-devel
+      - libudev-devel
+      - libevdev-devel
+      - doxygen
+      - graphviz
+      - python3-sphinx
+      - python3-recommonmark
+      - python3-sphinx_rtd_theme
+      - python3-pytest-xdist
+      - libwacom-devel
+      - cairo-devel
+      - gtk3-devel
+      - glib2-devel
+      - mtdev-devel
+      - diffutils
+      - valgrind        # for the valgrind run, optional
+  - name: debian
+    tag: *default_tag
+    versions:
+      - 'stable'
+    packages:
+      - git
+      - gcc
+      - g++
+      - pkg-config
+      - meson
+      - check
+      - libudev-dev
+      - libevdev-dev
+      - doxygen
+      - graphviz
+      - python3-sphinx
+      - python3-recommonmark
+      - python3-sphinx-rtd-theme
+      - python3-pytest-xdist
+      - libwacom-dev
+      - libcairo2-dev
+      - libgtk-3-dev
+      - libglib2.0-dev
+      - libmtdev-dev
+      - curl            # for the coverity job
   - name: ubuntu
     tag: *default_tag
     versions:
-      - '19.10'
+      - '20.10'
+      - '21.04'
+    packages:
+      - git
+      - gcc
+      - g++
+      - pkg-config
+      - meson
+      - check
+      - libudev-dev
+      - libevdev-dev
+      - doxygen
+      - graphviz
+      - python3-sphinx
+      - python3-recommonmark
+      - python3-sphinx-rtd-theme
+      - python3-pytest-xdist
+      - libwacom-dev
+      - libcairo2-dev
+      - libgtk-3-dev
+      - libglib2.0-dev
+      - libmtdev-dev
   - name: arch
     tag: *default_tag
     versions:
       - 'rolling'
+    packages:
+      - git
+      - gcc
+      - pkgconfig
+      - meson
+      - check
+      - libsystemd
+      - libevdev
+      - doxygen
+      - graphviz
+      - python-sphinx
+      - python-recommonmark
+      - python-sphinx_rtd_theme
+      - python-pytest-xdist
+      - libwacom
+      - gtk3
+      - mtdev
+      - diffutils
   - name: alpine
     tag: *default_tag
     versions:
       - 'latest'
+    packages:
+      - git
+      - gcc build-base
+      - pkgconfig
+      - meson
+      - check-dev
+      - eudev-dev
+      - libevdev-dev
+      - libwacom-dev
+      - cairo-dev
+      - gtk+3.0-dev
+      - mtdev-dev
+      - bash
     build:
       extra_variables:
         - "MESON_ARGS: '-Ddocumentation=false' # alpine does not have python-recommonmark"
@@ -34,42 +133,50 @@ distributions:
         - "MESON_TEST_ARGS: '' # litest-selftest fails on musl"
   - name: freebsd
     tag: *default_tag
+    packages:
+      - libepoll-shim
+      - libudev-devd
+      - libevdev
+      - libwacom
+      - gtk3
+      - libmtdev
     does_not_have_ci_templates: true
 
 test_suites:
   - name: touchpad
     suites:
-      touchpad
+      - touchpad
   - name: tap
     suites:
-      tap
+      - touchpad-tap
+  - name: touchpad-buttons
+    suites:
+      - touchpad-buttons
   - name: tablet
     suites:
-      tablet
+      - tablet
   - name: gestures-device
     suites:
-      gestures
-      device
-  - name: others
+      - gestures
+      - device
+  - name: backends
     suites:
-      context
-      config
-      misc
-      events
-      totem
-      udev
-      lid
-      log
-      timer
-      tablet-mode
-      quirks
-      trackball
-      pad
-      path
-      keyboard
-      switch
-      touch
-      trackpoint
+      - path
+      - udev
+  - name: misc
+    suites:
+      - log
+      - misc
+      - quirks
+  - name: other devices
+    suites:
+      - keyboard
+      - pad
+      - switch
+      - trackball
+      - trackpoint
+      - totem
+      - touch
   - name: pointer
     suites:
-      pointer
+      - pointer

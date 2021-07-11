@@ -4560,10 +4560,9 @@ enum libinput_config_drag_state {
  * @ingroup config
  *
  * Enable or disable tap-and-drag on this device. When enabled, a
- * single-finger tap immediately followed by a finger down results in a
- * button down event, subsequent finger motion thus triggers a drag. The
- * button is released on finger up. See the libinput documentation for more
- * details.
+ * tap immediately followed by a finger down results in a button down event,
+ * subsequent finger motion thus triggers a drag. The button is released
+ * on finger up. See the libinput documentation for more details.
  *
  * @param device The device to configure
  * @param enable @ref LIBINPUT_CONFIG_DRAG_ENABLED to enable, @ref
@@ -5053,7 +5052,7 @@ libinput_device_config_accel_get_profiles(struct libinput_device *device);
  * mode.
  *
  * @param device The device to configure
- * @param mode The mode to set the device to.
+ * @param profile The profile to set the device to.
  *
  * @return A config status code
  *
@@ -5061,7 +5060,7 @@ libinput_device_config_accel_get_profiles(struct libinput_device *device);
  */
 enum libinput_config_status
 libinput_device_config_accel_set_profile(struct libinput_device *device,
-					 enum libinput_config_accel_profile mode);
+					 enum libinput_config_accel_profile profile);
 
 /**
  * @ingroup config

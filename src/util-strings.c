@@ -59,6 +59,36 @@ next_word(const char **state, size_t *len, const char *separators)
 }
 
 /**
+ * Return a null-terminated string array with the contents of argv
+ * duplicated.
+ *
+ * Use strv_free() to free the array.
+ *
+ * @return A null-terminated string array or NULL on errors
+ */
+char**
+strv_from_argv(int argc, char **argv)
+{
+	char **strv = NULL;
+
+	assert(argc >= 0);
+
+	if (argc == 0)
+		return NULL;
+
+	strv = zalloc((argc + 1) * sizeof *strv);
+	for (int i = 0; i < argc; i++) {
+		char *copy = safe_strdup(argv[i]);
+		if (!copy) {
+			strv_free(strv);
+			return NULL;
+		}
+		strv[i] = copy;
+	}
+	return strv;
+}
+
+/**
  * Return a null-terminated string array with the tokens in the input
  * string, e.g. "one two\tthree" with a separator list of " \t" will return
  * an array [ "one", "two", "three", NULL ].
@@ -115,7 +145,7 @@ strv_from_string(const char *in, const char *separators)
  * An empty strv ([NULL]) returns NULL, same for passing NULL as either
  * argument.
  *
- * @param strv Input string arrray
+ * @param strv Input string array
  * @param joiner Joiner between the elements in the final string
  *
  * @return A null-terminated string joining all elements
@@ -154,4 +184,55 @@ strv_join(char **strv, const char *joiner)
 	}
 
 	return str;
+}
+
+/**
+ * Return a pointer to the basename within filename.
+ * If the filename the empty string or a directory (i.e. the last char of
+ * filename is '/') NULL is returned.
+ */
+const char *
+safe_basename(const char *filename)
+{
+	const char *basename;
+
+	if (*filename == '\0')
+		return NULL;
+
+	basename = strrchr(filename, '/');
+	if (basename == NULL)
+		return filename;
+
+	if (*(basename + 1) == '\0')
+		return NULL;
+
+	return basename + 1;
+}
+
+
+/**
+ * Similar to basename() but returns the trunk only without the (last)
+ * trailing suffix, so that:
+ *
+ * - foo.c returns foo
+ * - foo.a.b returns foo.a
+ * - foo returns foo
+ * - foo/ returns ""
+ *
+ * @return an allocated string representing the trunk name of the file
+ */
+char *
+trunkname(const char *filename)
+{
+	const char *base = safe_basename(filename);
+	char *suffix;
+
+	if (base == NULL)
+		return strdup("");
+
+	suffix = rindex(base, '.');
+	if (suffix == NULL)
+		return strdup(base);
+	else
+		return strndup(base, suffix-base);
 }

@@ -289,7 +289,7 @@ print_device_notify(struct libinput_event *ev)
 }
 
 static void
-print_key_event(struct libinput *li, struct libinput_event *ev)
+print_key_event(struct libinput_event *ev)
 {
 	struct libinput_event_keyboard *k = libinput_event_get_keyboard_event(ev);
 	enum libinput_key_state state;
@@ -521,15 +521,6 @@ print_tablet_axis_event(struct libinput_event *ev)
 }
 
 static void
-print_touch_event_without_coords(struct libinput_event *ev)
-{
-	struct libinput_event_touch *t = libinput_event_get_touch_event(ev);
-
-	print_event_time(libinput_event_touch_get_time(t));
-	printq("\n");
-}
-
-static void
 print_proximity_event(struct libinput_event *ev)
 {
 	struct libinput_event_tablet_tool *t = libinput_event_get_tablet_tool_event(ev);
@@ -629,21 +620,30 @@ print_proximity_event(struct libinput_event *ev)
 }
 
 static void
-print_touch_event_with_coords(struct libinput_event *ev)
+print_touch_event(struct libinput_event *ev)
 {
 	struct libinput_event_touch *t = libinput_event_get_touch_event(ev);
-	double x = libinput_event_touch_get_x_transformed(t, screen_width);
-	double y = libinput_event_touch_get_y_transformed(t, screen_height);
-	double xmm = libinput_event_touch_get_x(t);
-	double ymm = libinput_event_touch_get_y(t);
+	enum libinput_event_type type = libinput_event_get_type(ev);
 
 	print_event_time(libinput_event_touch_get_time(t));
 
-	printq("%d (%d) %5.2f/%5.2f (%5.2f/%5.2fmm)\n",
-	       libinput_event_touch_get_slot(t),
-	       libinput_event_touch_get_seat_slot(t),
-	       x, y,
-	       xmm, ymm);
+	if (type != LIBINPUT_EVENT_TOUCH_FRAME) {
+		printq("%d (%d)",
+		       libinput_event_touch_get_slot(t),
+		       libinput_event_touch_get_seat_slot(t));
+	}
+
+	if (type == LIBINPUT_EVENT_TOUCH_DOWN ||
+	    type == LIBINPUT_EVENT_TOUCH_MOTION) {
+		double x = libinput_event_touch_get_x_transformed(t, screen_width);
+		double y = libinput_event_touch_get_y_transformed(t, screen_height);
+		double xmm = libinput_event_touch_get_x(t);
+		double ymm = libinput_event_touch_get_y(t);
+
+		printq(" %5.2f/%5.2f (%5.2f/%5.2fmm)", x, y, xmm, ymm);
+	}
+
+	printq("\n");
 }
 
 static void
@@ -824,7 +824,7 @@ handle_and_print_events(struct libinput *li)
 	int rc = -1;
 	struct libinput_event *ev;
 
-	libinput_dispatch(li);
+	tools_dispatch(li);
 	while ((ev = libinput_get_event(li))) {
 		print_event_header(ev);
 
@@ -840,7 +840,7 @@ handle_and_print_events(struct libinput *li)
 			print_device_notify(ev);
 			break;
 		case LIBINPUT_EVENT_KEYBOARD_KEY:
-			print_key_event(li, ev);
+			print_key_event(ev);
 			break;
 		case LIBINPUT_EVENT_POINTER_MOTION:
 			print_motion_event(ev);
@@ -855,19 +855,11 @@ handle_and_print_events(struct libinput *li)
 			print_pointer_axis_event(ev);
 			break;
 		case LIBINPUT_EVENT_TOUCH_DOWN:
-			print_touch_event_with_coords(ev);
-			break;
 		case LIBINPUT_EVENT_TOUCH_MOTION:
-			print_touch_event_with_coords(ev);
-			break;
 		case LIBINPUT_EVENT_TOUCH_UP:
-			print_touch_event_without_coords(ev);
-			break;
 		case LIBINPUT_EVENT_TOUCH_CANCEL:
-			print_touch_event_without_coords(ev);
-			break;
 		case LIBINPUT_EVENT_TOUCH_FRAME:
-			print_touch_event_without_coords(ev);
+			print_touch_event(ev);
 			break;
 		case LIBINPUT_EVENT_GESTURE_SWIPE_BEGIN:
 			print_gesture_event_without_coords(ev);
@@ -917,7 +909,6 @@ handle_and_print_events(struct libinput *li)
 		}
 
 		libinput_event_destroy(ev);
-		libinput_dispatch(li);
 		rc = 0;
 	}
 	return rc;

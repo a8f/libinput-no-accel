@@ -31,6 +31,9 @@
 /* Use as designater for litest to change the value */
 #define LITEST_AUTO_ASSIGN INT_MIN
 
+/* Special event code to auto-assign the BTN_TOOL_PEN and friends */
+#define LITEST_BTN_TOOL_AUTO (KEY_MAX << 1)
+
 struct litest_test_device {
 	struct list node; /* global test device list */
 
@@ -111,6 +114,12 @@ struct litest_device_interface {
 	struct input_event *tablet_proximity_out_events;
 	struct input_event *tablet_motion_events;
 
+	bool (*tablet_proximity_in)(struct litest_device *d,
+				    unsigned int tool_type,
+				    double x, double y,
+				    struct axis_replacement *axes);
+	bool (*tablet_proximity_out)(struct litest_device *d, unsigned int tool_type);
+
 	/**
 	 * Pad events, LITEST_AUTO_ASSIGN is allowed on event values
 	 * for ABS_WHEEL
@@ -129,6 +138,8 @@ struct litest_device_interface {
 
 	int min[2]; /* x/y axis minimum */
 	int max[2]; /* x/y axis maximum */
+
+	unsigned int tool_type;
 };
 
 struct path {
@@ -138,6 +149,7 @@ struct path {
 };
 
 struct litest_context {
+	struct litest_user_data *user_data;
 	struct list paths;
 };
 

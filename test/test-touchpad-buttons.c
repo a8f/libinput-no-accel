@@ -291,7 +291,6 @@ START_TEST(touchpad_4fg_clickfinger)
 {
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
-	struct libinput_event *event;
 
 	if (litest_slot_count(dev) < 4)
 		return;
@@ -315,18 +314,6 @@ START_TEST(touchpad_4fg_clickfinger)
 
 	libinput_dispatch(li);
 
-	litest_wait_for_event(li);
-	event = libinput_get_event(li);
-	litest_is_button_event(event,
-			       BTN_MIDDLE,
-			       LIBINPUT_BUTTON_STATE_PRESSED);
-	libinput_event_destroy(event);
-	event = libinput_get_event(li);
-	litest_is_button_event(event,
-			       BTN_MIDDLE,
-			       LIBINPUT_BUTTON_STATE_RELEASED);
-	libinput_event_destroy(event);
-
 	litest_assert_empty_queue(li);
 }
 END_TEST
@@ -335,7 +322,6 @@ START_TEST(touchpad_4fg_clickfinger_btntool_2slots)
 {
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
-	struct libinput_event *event;
 
 	if (litest_slot_count(dev) >= 3 ||
 	    !libevdev_has_event_code(dev->evdev, EV_KEY, BTN_TOOL_QUADTAP))
@@ -360,18 +346,6 @@ START_TEST(touchpad_4fg_clickfinger_btntool_2slots)
 	litest_touch_up(dev, 0);
 	litest_touch_up(dev, 1);
 
-	litest_wait_for_event(li);
-	event = libinput_get_event(li);
-	litest_is_button_event(event,
-			       BTN_MIDDLE,
-			       LIBINPUT_BUTTON_STATE_PRESSED);
-	libinput_event_destroy(event);
-	event = libinput_get_event(li);
-	litest_is_button_event(event,
-			       BTN_MIDDLE,
-			       LIBINPUT_BUTTON_STATE_RELEASED);
-	libinput_event_destroy(event);
-
 	litest_assert_empty_queue(li);
 }
 END_TEST
@@ -380,7 +354,6 @@ START_TEST(touchpad_4fg_clickfinger_btntool_3slots)
 {
 	struct litest_device *dev = litest_current_device();
 	struct libinput *li = dev->libinput;
-	struct libinput_event *event;
 
 	if (litest_slot_count(dev) != 3 ||
 	    !libevdev_has_event_code(dev->evdev, EV_KEY, BTN_TOOL_TRIPLETAP))
@@ -408,18 +381,6 @@ START_TEST(touchpad_4fg_clickfinger_btntool_3slots)
 	litest_touch_up(dev, 2);
 
 	libinput_dispatch(li);
-
-	litest_wait_for_event(li);
-	event = libinput_get_event(li);
-	litest_is_button_event(event,
-			       BTN_MIDDLE,
-			       LIBINPUT_BUTTON_STATE_PRESSED);
-	libinput_event_destroy(event);
-	event = libinput_get_event(li);
-	litest_is_button_event(event,
-			       BTN_MIDDLE,
-			       LIBINPUT_BUTTON_STATE_RELEASED);
-	libinput_event_destroy(event);
 
 	litest_assert_empty_queue(li);
 }
@@ -2092,75 +2053,144 @@ START_TEST(clickpad_middleemulation_click_disable_while_down)
 }
 END_TEST
 
+START_TEST(touchpad_non_clickpad_detection)
+{
+	struct libinput *li;
+	struct libinput_device *device;
+	struct libevdev_uinput *uinput;
+	static struct input_absinfo absinfo[] = {
+		{ ABS_X, 1472, 5472, 0, 0, 75 },
+		{ ABS_Y, 1408, 4448, 0, 0, 129 },
+		{ ABS_PRESSURE, 0, 255, 0, 0, 0 },
+		{ ABS_TOOL_WIDTH, 0, 15, 0, 0, 0 },
+		{ ABS_MT_SLOT, 0, 1, 0, 0, 0 },
+		{ ABS_MT_POSITION_X, 1472, 5472, 0, 0, 75 },
+		{ ABS_MT_POSITION_Y, 1408, 4448, 0, 0, 129 },
+		{ ABS_MT_TRACKING_ID, 0, 65535, 0, 0, 0 },
+		{ ABS_MT_PRESSURE, 0, 255, 0, 0, 0 },
+		{ .value = -1 }
+	};
+	uint32_t methods;
+
+	/* Create a touchpad with only a left button but missing
+	 * INPUT_PROP_BUTTONPAD. We should treat this as clickpad.
+	 */
+	uinput = litest_create_uinput_abs_device("litest NonClickpad",
+						 NULL,
+						 absinfo,
+						 EV_KEY, BTN_LEFT,
+						 EV_KEY, BTN_TOOL_FINGER,
+						 EV_KEY, BTN_TOUCH,
+						 -1);
+
+	li = litest_create_context();
+	device = libinput_path_add_device(li,
+					  libevdev_uinput_get_devnode(uinput));
+
+	methods = libinput_device_config_click_get_methods(device);
+	ck_assert(methods & LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS);
+	ck_assert(methods & LIBINPUT_CONFIG_CLICK_METHOD_CLICKFINGER);
+
+
+	libinput_path_remove_device(device);
+	libevdev_uinput_destroy(uinput);
+	litest_destroy_context(li);
+}
+END_TEST
+
+START_TEST(touchpad_clickpad_detection)
+{
+	struct litest_device *dev;
+	uint32_t methods;
+	int codes[] = {
+		INPUT_PROP_MAX, INPUT_PROP_BUTTONPAD,
+		-1, -1,
+	};
+
+	/* Create a device with LR buttons and INPUT_PROP_BUTTONPAD set - we
+	 * should ignore the property and assume it's a non-clickpad.
+	 * Only way to check that is to verify no click methods are set.
+	 */
+	dev = litest_create_device_with_overrides(LITEST_SYNAPTICS_TOUCHPAD,
+						  "litest Fake Clickpad",
+						  NULL, NULL, codes);
+
+	methods = libinput_device_config_click_get_methods(dev->libinput_device);
+	ck_assert(methods == 0);
+	litest_delete_device(dev);
+}
+END_TEST
+
 TEST_COLLECTION(touchpad_buttons)
 {
 	struct range finger_count = {1, 4};
 
-	litest_add("touchpad:button", touchpad_button, LITEST_TOUCHPAD, LITEST_CLICKPAD);
+	litest_add(touchpad_button, LITEST_TOUCHPAD, LITEST_CLICKPAD);
 
-	litest_add("touchpad:clickfinger", touchpad_1fg_clickfinger, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger", touchpad_1fg_clickfinger_no_touch, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger", touchpad_2fg_clickfinger, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger", touchpad_3fg_clickfinger, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger", touchpad_3fg_clickfinger_btntool, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger", touchpad_4fg_clickfinger, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger", touchpad_4fg_clickfinger_btntool_2slots, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger", touchpad_4fg_clickfinger_btntool_3slots, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger", touchpad_2fg_clickfinger_distance, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger", touchpad_3fg_clickfinger_distance, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger", touchpad_3fg_clickfinger_distance_btntool, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add_for_device("touchpad:clickfinger", touchpad_2fg_clickfinger_bottom, LITEST_SYNAPTICS_TOPBUTTONPAD);
-	litest_add("touchpad:clickfinger", touchpad_clickfinger_to_area_method, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger",
-		   touchpad_clickfinger_to_area_method_while_down, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger", touchpad_area_to_clickfinger_method, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:clickfinger",
-		   touchpad_area_to_clickfinger_method_while_down, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_1fg_clickfinger, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_1fg_clickfinger_no_touch, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_2fg_clickfinger, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_3fg_clickfinger, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_3fg_clickfinger_btntool, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_4fg_clickfinger, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_4fg_clickfinger_btntool_2slots, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_4fg_clickfinger_btntool_3slots, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_2fg_clickfinger_distance, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_3fg_clickfinger_distance, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_3fg_clickfinger_distance_btntool, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add_for_device(touchpad_2fg_clickfinger_bottom, LITEST_SYNAPTICS_TOPBUTTONPAD);
+	litest_add(touchpad_clickfinger_to_area_method, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_clickfinger_to_area_method_while_down, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_area_to_clickfinger_method, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_area_to_clickfinger_method_while_down, LITEST_CLICKPAD, LITEST_ANY);
 	/* run those two for the T440 one only so we don't have to worry
 	 * about small touchpads messing with thumb detection expectations */
-	litest_add_for_device("touchpad:clickfinger", touchpad_clickfinger_3fg_tool_position, LITEST_SYNAPTICS_TOPBUTTONPAD);
-	litest_add_for_device("touchpad:clickfinger", touchpad_clickfinger_4fg_tool_position, LITEST_SYNAPTICS_TOPBUTTONPAD);
+	litest_add_for_device(touchpad_clickfinger_3fg_tool_position, LITEST_SYNAPTICS_TOPBUTTONPAD);
+	litest_add_for_device(touchpad_clickfinger_4fg_tool_position, LITEST_SYNAPTICS_TOPBUTTONPAD);
 
-	litest_add_for_device("touchpad:clickfinger", touchpad_clickfinger_appletouch_config, LITEST_APPLETOUCH);
-	litest_add_for_device("touchpad:clickfinger", touchpad_clickfinger_appletouch_1fg, LITEST_APPLETOUCH);
-	litest_add_for_device("touchpad:clickfinger", touchpad_clickfinger_appletouch_2fg, LITEST_APPLETOUCH);
-	litest_add_for_device("touchpad:clickfinger", touchpad_clickfinger_appletouch_3fg, LITEST_APPLETOUCH);
+	litest_add_for_device(touchpad_clickfinger_appletouch_config, LITEST_APPLETOUCH);
+	litest_add_for_device(touchpad_clickfinger_appletouch_1fg, LITEST_APPLETOUCH);
+	litest_add_for_device(touchpad_clickfinger_appletouch_2fg, LITEST_APPLETOUCH);
+	litest_add_for_device(touchpad_clickfinger_appletouch_3fg, LITEST_APPLETOUCH);
 
-	litest_add_ranged("touchpad:clickfinger", touchpad_clickfinger_click_drag, LITEST_CLICKPAD, LITEST_ANY, &finger_count);
+	litest_add_ranged(touchpad_clickfinger_click_drag, LITEST_CLICKPAD, LITEST_ANY, &finger_count);
 
-	litest_add("touchpad:click", touchpad_click_defaults_clickfinger, LITEST_APPLE_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:click", touchpad_click_defaults_btnarea, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
-	litest_add("touchpad:click", touchpad_click_defaults_none, LITEST_TOUCHPAD, LITEST_CLICKPAD);
-	litest_add("touchpad:click", touchpad_click_defaults_none, LITEST_ANY, LITEST_TOUCHPAD);
+	litest_add(touchpad_click_defaults_clickfinger, LITEST_APPLE_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_click_defaults_btnarea, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
+	litest_add(touchpad_click_defaults_none, LITEST_TOUCHPAD, LITEST_CLICKPAD);
+	litest_add(touchpad_click_defaults_none, LITEST_ANY, LITEST_TOUCHPAD);
 
-	litest_add("touchpad:click", touchpad_btn_left, LITEST_TOUCHPAD|LITEST_BUTTON, LITEST_CLICKPAD);
-	litest_add("touchpad:click", clickpad_btn_left, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:click", clickpad_click_n_drag, LITEST_CLICKPAD, LITEST_SINGLE_TOUCH);
-	litest_add("touchpad:click", clickpad_finger_pin, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(touchpad_btn_left, LITEST_TOUCHPAD|LITEST_BUTTON, LITEST_CLICKPAD);
+	litest_add(clickpad_btn_left, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(clickpad_click_n_drag, LITEST_CLICKPAD, LITEST_SINGLE_TOUCH);
+	litest_add(clickpad_finger_pin, LITEST_CLICKPAD, LITEST_ANY);
 
-	litest_add("touchpad:softbutton", clickpad_softbutton_left, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
-	litest_add("touchpad:softbutton", clickpad_softbutton_middle, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
-	litest_add("touchpad:softbutton", clickpad_softbutton_right, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
-	litest_add("touchpad:softbutton", clickpad_softbutton_left_tap_n_drag, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
-	litest_add("touchpad:softbutton", clickpad_softbutton_right_tap_n_drag, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
-	litest_add("touchpad:softbutton", clickpad_softbutton_left_1st_fg_move, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
-	litest_add("touchpad:softbutton", clickpad_softbutton_left_2nd_fg_move, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
-	litest_add("touchpad:softbutton", clickpad_softbutton_left_to_right, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
-	litest_add("touchpad:softbutton", clickpad_softbutton_right_to_left, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
-	litest_add("touchpad:softbutton", clickpad_softbutton_hover_into_buttons, LITEST_CLICKPAD|LITEST_HOVER, LITEST_APPLE_CLICKPAD);
+	litest_add(clickpad_softbutton_left, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
+	litest_add(clickpad_softbutton_middle, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
+	litest_add(clickpad_softbutton_right, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
+	litest_add(clickpad_softbutton_left_tap_n_drag, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
+	litest_add(clickpad_softbutton_right_tap_n_drag, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
+	litest_add(clickpad_softbutton_left_1st_fg_move, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
+	litest_add(clickpad_softbutton_left_2nd_fg_move, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
+	litest_add(clickpad_softbutton_left_to_right, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
+	litest_add(clickpad_softbutton_right_to_left, LITEST_CLICKPAD, LITEST_APPLE_CLICKPAD);
+	litest_add(clickpad_softbutton_hover_into_buttons, LITEST_CLICKPAD|LITEST_HOVER, LITEST_APPLE_CLICKPAD);
 
-	litest_add("touchpad:topsoftbuttons", clickpad_topsoftbuttons_left, LITEST_TOPBUTTONPAD, LITEST_ANY);
-	litest_add("touchpad:topsoftbuttons", clickpad_topsoftbuttons_right, LITEST_TOPBUTTONPAD, LITEST_ANY);
-	litest_add("touchpad:topsoftbuttons", clickpad_topsoftbuttons_middle, LITEST_TOPBUTTONPAD, LITEST_ANY);
-	litest_add("touchpad:topsoftbuttons", clickpad_topsoftbuttons_move_out_leftclick, LITEST_TOPBUTTONPAD, LITEST_ANY);
-	litest_add("touchpad:topsoftbuttons", clickpad_topsoftbuttons_move_out_leftclick_before_timeout, LITEST_TOPBUTTONPAD, LITEST_ANY);
-	litest_add("touchpad:topsoftbuttons", clickpad_topsoftbuttons_clickfinger, LITEST_TOPBUTTONPAD, LITEST_ANY);
-	litest_add("touchpad:topsoftbuttons", clickpad_topsoftbuttons_clickfinger_dev_disabled, LITEST_TOPBUTTONPAD, LITEST_ANY);
+	litest_add(clickpad_topsoftbuttons_left, LITEST_TOPBUTTONPAD, LITEST_ANY);
+	litest_add(clickpad_topsoftbuttons_right, LITEST_TOPBUTTONPAD, LITEST_ANY);
+	litest_add(clickpad_topsoftbuttons_middle, LITEST_TOPBUTTONPAD, LITEST_ANY);
+	litest_add(clickpad_topsoftbuttons_move_out_leftclick, LITEST_TOPBUTTONPAD, LITEST_ANY);
+	litest_add(clickpad_topsoftbuttons_move_out_leftclick_before_timeout, LITEST_TOPBUTTONPAD, LITEST_ANY);
+	litest_add(clickpad_topsoftbuttons_clickfinger, LITEST_TOPBUTTONPAD, LITEST_ANY);
+	litest_add(clickpad_topsoftbuttons_clickfinger_dev_disabled, LITEST_TOPBUTTONPAD, LITEST_ANY);
 
-	litest_add("touchpad:middleemulation", clickpad_middleemulation_config_delayed, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:middleemulation", clickpad_middleemulation_click, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:middleemulation", clickpad_middleemulation_click_middle_left, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:middleemulation", clickpad_middleemulation_click_middle_right, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:middleemulation", clickpad_middleemulation_click_enable_while_down, LITEST_CLICKPAD, LITEST_ANY);
-	litest_add("touchpad:middleemulation", clickpad_middleemulation_click_disable_while_down, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(clickpad_middleemulation_config_delayed, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(clickpad_middleemulation_click, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(clickpad_middleemulation_click_middle_left, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(clickpad_middleemulation_click_middle_right, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(clickpad_middleemulation_click_enable_while_down, LITEST_CLICKPAD, LITEST_ANY);
+	litest_add(clickpad_middleemulation_click_disable_while_down, LITEST_CLICKPAD, LITEST_ANY);
+
+	litest_add_no_device(touchpad_clickpad_detection);
+	litest_add_no_device(touchpad_non_clickpad_detection);
 }

@@ -35,6 +35,9 @@
 #include <dirent.h>
 #include <fnmatch.h>
 #include <libgen.h>
+#ifdef __FreeBSD__
+#include <kenv.h>
+#endif
 
 #include "libinput-versionsort.h"
 #include "libinput-util.h"
@@ -57,6 +60,14 @@ enum property_type {
 	PT_RANGE,
 	PT_DOUBLE,
 	PT_TUPLES,
+	PT_UINT_ARRAY,
+};
+
+struct quirk_array {
+	union {
+		uint32_t u[32];
+	} data;
+	size_t nelements;
 };
 
 /**
@@ -79,6 +90,7 @@ struct property {
 		struct quirk_dimensions dim;
 		struct quirk_range range;
 		struct quirk_tuples tuples;
+		struct quirk_array array;
 	} value;
 };
 
@@ -102,6 +114,7 @@ enum bustype {
 	BT_PS2,
 	BT_RMI,
 	BT_I2C,
+	BT_SPI,
 };
 
 enum udev_type {
@@ -239,11 +252,8 @@ quirk_get_name(enum quirk q)
 	case QUIRK_MODEL_HP_STREAM11_TOUCHPAD:		return "ModelHPStream11Touchpad";
 	case QUIRK_MODEL_HP_ZBOOK_STUDIO_G3:		return "ModelHPZBookStudioG3";
 	case QUIRK_MODEL_INVERT_HORIZONTAL_SCROLLING:	return "ModelInvertHorizontalScrolling";
-	case QUIRK_MODEL_LENOVO_L380_TOUCHPAD:		return "ModelLenovoL380Touchpad";
 	case QUIRK_MODEL_LENOVO_SCROLLPOINT:		return "ModelLenovoScrollPoint";
 	case QUIRK_MODEL_LENOVO_T450_TOUCHPAD:		return "ModelLenovoT450Touchpad";
-	case QUIRK_MODEL_LENOVO_T480S_TOUCHPAD:		return "ModelLenovoT480sTouchpad";
-	case QUIRK_MODEL_LENOVO_T490S_TOUCHPAD:		return "ModelLenovoT490sTouchpad";
 	case QUIRK_MODEL_LENOVO_X1GEN6_TOUCHPAD:	return "ModelLenovoX1Gen6Touchpad";
 	case QUIRK_MODEL_LENOVO_X230:			return "ModelLenovoX230";
 	case QUIRK_MODEL_SYNAPTICS_SERIAL_TOUCHPAD:	return "ModelSynapticsSerialTouchpad";
@@ -273,6 +283,9 @@ quirk_get_name(enum quirk q)
 	case QUIRK_ATTR_THUMB_SIZE_THRESHOLD:		return "AttrThumbSizeThreshold";
 	case QUIRK_ATTR_MSC_TIMESTAMP:			return "AttrMscTimestamp";
 	case QUIRK_ATTR_EVENT_CODE_DISABLE:		return "AttrEventCodeDisable";
+	case QUIRK_ATTR_EVENT_CODE_ENABLE:		return "AttrEventCodeEnable";
+	case QUIRK_ATTR_INPUT_PROP_DISABLE:		return "AttrInputPropDisable";
+	case QUIRK_ATTR_INPUT_PROP_ENABLE:		return "AttrInputPropEnable";
 	default:
 		abort();
 	}
@@ -343,19 +356,17 @@ property_cleanup(struct property *p)
 }
 
 /**
- * Return the dmi modalias from the udev device.
+ * Return the system DMI info in modalias format.
  */
+#ifdef __linux__
 static inline char *
-init_dmi(void)
+init_dmi_linux(void)
 {
 	struct udev *udev;
 	struct udev_device *udev_device;
 	const char *modalias = NULL;
 	char *copy = NULL;
 	const char *syspath = "/sys/devices/virtual/dmi/id";
-
-	if (getenv("LIBINPUT_RUNNING_TEST_SUITE"))
-		return safe_strdup("dmi:");
 
 	udev = udev_new();
 	if (!udev)
@@ -378,6 +389,73 @@ init_dmi(void)
 	udev_unref(udev);
 
 	return copy;
+}
+#endif
+
+#ifdef __FreeBSD__
+static inline char *
+init_dmi_freebsd(void)
+{
+#define LEN (KENV_MVALLEN + 1)
+	char *modalias;
+	char bios_vendor[LEN], bios_version[LEN], bios_date[LEN];
+	char sys_vendor[LEN], product_name[LEN], product_version[LEN];
+	char board_vendor[LEN], board_name[LEN], board_version[LEN];
+	char chassis_vendor[LEN], chassis_type[LEN], chassis_version[LEN];
+	int chassis_type_num = 0x2;
+
+	kenv(KENV_GET, "smbios.bios.vendor", bios_vendor, LEN);
+	kenv(KENV_GET, "smbios.bios.version", bios_version, LEN);
+	kenv(KENV_GET, "smbios.bios.reldate", bios_date, LEN);
+	kenv(KENV_GET, "smbios.system.maker", sys_vendor, LEN);
+	kenv(KENV_GET, "smbios.system.product", product_name, LEN);
+	kenv(KENV_GET, "smbios.system.version", product_version, LEN);
+	kenv(KENV_GET, "smbios.planar.maker", board_vendor, LEN);
+	kenv(KENV_GET, "smbios.planar.product", board_name, LEN);
+	kenv(KENV_GET, "smbios.planar.version", board_version, LEN);
+	kenv(KENV_GET, "smbios.chassis.vendor", chassis_vendor, LEN);
+	kenv(KENV_GET, "smbios.chassis.type", chassis_type, LEN);
+	kenv(KENV_GET, "smbios.chassis.version", chassis_version, LEN);
+#undef LEN
+
+	if (strcmp(chassis_type, "Desktop") == 0)
+		chassis_type_num = 0x3;
+	else if (strcmp(chassis_type, "Portable") == 0)
+		chassis_type_num = 0x8;
+	else if (strcmp(chassis_type, "Laptop") == 0)
+		chassis_type_num = 0x9;
+	else if (strcmp(chassis_type, "Notebook") == 0)
+		chassis_type_num = 0xA;
+	else if (strcmp(chassis_type, "Tablet") == 0)
+		chassis_type_num = 0x1E;
+	else if (strcmp(chassis_type, "Convertible") == 0)
+		chassis_type_num = 0x1F;
+	else if (strcmp(chassis_type, "Detachable") == 0)
+		chassis_type_num = 0x20;
+
+	xasprintf(&modalias,
+		"dmi:bvn%s:bvr%s:bd%s:svn%s:pn%s:pvr%s:rvn%s:rn%s:rvr%s:cvn%s:ct%d:cvr%s:",
+		bios_vendor, bios_version, bios_date, sys_vendor, product_name,
+		product_version, board_vendor, board_name, board_version, chassis_vendor,
+		chassis_type_num, chassis_version);
+
+	return modalias;
+}
+#endif
+
+static inline char *
+init_dmi(void)
+{
+	if (getenv("LIBINPUT_RUNNING_TEST_SUITE"))
+		return safe_strdup("dmi:");
+
+#if defined(__linux__)
+	return init_dmi_linux();
+#elif defined(__FreeBSD__)
+	return init_dmi_freebsd();
+#else
+	return NULL;
+#endif
 }
 
 /**
@@ -426,14 +504,14 @@ section_new(const char *path, const char *name)
 static inline void
 section_destroy(struct section *s)
 {
-	struct property *p, *tmp;
+	struct property *p;
 
 	free(s->name);
 	free(s->match.name);
 	free(s->match.dmi);
 	free(s->match.dt);
 
-	list_for_each_safe(p, tmp, &s->properties, link)
+	list_for_each_safe(p, &s->properties, link)
 		property_cleanup(p);
 
 	assert(list_empty(&s->properties));
@@ -490,6 +568,8 @@ parse_match(struct quirks_context *ctx,
 			s->match.bus = BT_RMI;
 		else if (streq(value, "i2c"))
 			s->match.bus = BT_I2C;
+		else if (streq(value, "spi"))
+			s->match.bus = BT_SPI;
 		else
 			goto out;
 	} else if (streq(key, "MatchVendor")) {
@@ -737,10 +817,15 @@ parse_attr(struct quirks_context *ctx,
 		p->type = PT_STRING;
 		p->value.s = safe_strdup(value);
 		rc = true;
-	} else if (streq(key, quirk_get_name(QUIRK_ATTR_EVENT_CODE_DISABLE))) {
+	} else if (streq(key, quirk_get_name(QUIRK_ATTR_EVENT_CODE_DISABLE)) ||
+		   streq(key, quirk_get_name(QUIRK_ATTR_EVENT_CODE_ENABLE))) {
 		struct input_event events[32];
 		size_t nevents = ARRAY_LENGTH(events);
-		p->id = QUIRK_ATTR_EVENT_CODE_DISABLE;
+		if (streq(key, quirk_get_name(QUIRK_ATTR_EVENT_CODE_DISABLE)))
+		    p->id = QUIRK_ATTR_EVENT_CODE_DISABLE;
+		else
+		    p->id = QUIRK_ATTR_EVENT_CODE_ENABLE;
+
 		if (!parse_evcode_property(value, events, &nevents) ||
 		    nevents == 0)
 			goto out;
@@ -751,6 +836,24 @@ parse_attr(struct quirks_context *ctx,
 		}
 		p->value.tuples.ntuples = nevents;
 		p->type = PT_TUPLES;
+
+		rc = true;
+	} else if (streq(key, quirk_get_name(QUIRK_ATTR_INPUT_PROP_DISABLE)) ||
+		   streq(key, quirk_get_name(QUIRK_ATTR_INPUT_PROP_ENABLE))) {
+		unsigned int props[INPUT_PROP_CNT];
+		size_t nprops = ARRAY_LENGTH(props);
+		if (streq(key, quirk_get_name(QUIRK_ATTR_INPUT_PROP_DISABLE)))
+			p->id = QUIRK_ATTR_INPUT_PROP_DISABLE;
+		else
+			p->id = QUIRK_ATTR_INPUT_PROP_ENABLE;
+
+		if (!parse_input_prop_property(value, props, &nprops) ||
+		    nprops == 0)
+			goto out;
+
+		memcpy(p->value.array.data.u, props, nprops * sizeof(unsigned int));
+		p->value.array.nelements = nprops;
+		p->type = PT_UINT_ARRAY;
 
 		rc = true;
 	} else {
@@ -916,7 +1019,7 @@ parse_file(struct quirks_context *ctx, const char *path)
 			break;
 		default:
 			/* entries must start with A-Z */
-			if (line[0] < 'A' && line[0] > 'Z') {
+			if (line[0] < 'A' || line[0] > 'Z') {
 				qlog_parser(ctx, "%s:%d: Unexpected line %s\n",
 						 path, lineno, line);
 				goto out;
@@ -1067,7 +1170,7 @@ quirks_context_ref(struct quirks_context *ctx)
 struct quirks_context *
 quirks_context_unref(struct quirks_context *ctx)
 {
-	struct section *s, *tmp;
+	struct section *s;
 
 	if (!ctx)
 		return NULL;
@@ -1081,7 +1184,7 @@ quirks_context_unref(struct quirks_context *ctx)
 	/* Caller needs to clean up before calling this */
 	assert(list_empty(&ctx->quirks));
 
-	list_for_each_safe(s, tmp, &ctx->sections, link) {
+	list_for_each_safe(s, &ctx->sections, link) {
 		section_destroy(s);
 	}
 
@@ -1207,6 +1310,10 @@ match_fill_bus_vid_pid(struct match *m,
 		break;
 	case BUS_I2C:
 		m->bus = BT_I2C;
+		m->bits |= M_BUS;
+		break;
+	case BUS_SPI:
+		m->bus = BT_SPI;
 		m->bits |= M_BUS;
 		break;
 	default:
@@ -1580,6 +1687,28 @@ quirks_get_tuples(struct quirks *q,
 
 	assert(p->type == PT_TUPLES);
 	*tuples = &p->value.tuples;
+
+	return true;
+}
+
+bool
+quirks_get_uint32_array(struct quirks *q,
+			enum quirk which,
+			const uint32_t **array,
+			size_t *nelements)
+{
+	struct property *p;
+
+	if (!q)
+		return false;
+
+	p = quirk_find_prop(q, which);
+	if (!p)
+		return false;
+
+	assert(p->type == PT_UINT_ARRAY);
+	*array = p->value.array.data.u;
+	*nelements = p->value.array.nelements;
 
 	return true;
 }

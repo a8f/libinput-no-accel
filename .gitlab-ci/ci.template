@@ -8,18 +8,17 @@
 #                                      #
 ########################################
 
-#
 # This is a bit complicated for two reasons:
 # - we really want to run dnf/apt/... only once, updating on the test runner for
 #   each job takes forever. So we create a container image for each distribution
 #   tested, then run the tests on this container image.
 #
-#   Creating a container image is time-consuming, so we only do so for pushes to
-#   libinput directly (not merge requests) and if the current image is 'old'.
+#   This is handled by the ci-templates, ensuring containers are only rebuilt
+#   when the TAG changes.
 #
 # - GitLab only allows one script: set per job but we have a bunch of commands
 #   we need to re-run for each build (meson && ninja && etc). YAML cannot merge
-#   arrays templates so we're screwed.
+#   arrays so we're screwed.
 #
 #   So instead we use a default_build template and override everything with
 #   variables. The only two variables that matter:
@@ -33,7 +32,7 @@
 # <distribution>:<version>@activity:
 #  e.g. fedora:31@build-default
 
-.templates_sha: &template_sha 395535ce90eb48e260c0dff12c35d9237e22c539 # see https://docs.gitlab.com/ee/ci/yaml/#includefile
+.templates_sha: &template_sha 18194044f0f984c8815bc9a1a146582f6bf15d41 # see https://docs.gitlab.com/ee/ci/yaml/#includefile
 
 include:
   {% for distro in distributions|sort(attribute="name") %}
@@ -44,15 +43,20 @@ include:
     file: '/templates/{{distro.name}}.yml'
   {% endif %}
   {% endfor %}
+  - project: 'freedesktop/ci-templates'
+    ref: *template_sha
+    file: '/templates/ci-fairy.yml'
 
 stages:
+  - sanity check     # CI/commit checks
   - prep             # prep work like rebuilding the container images if there is a change
   - build            # for actually building and testing things in a container
-  - VM               # for running the test suite in a VM
+  - test-suite       # for running the test suite in a VM
+  - test-suite-no-libwacom # for running the test suite in a VM (libwacom disabled)
   - valgrind         # for running the test suite under valgrind in a VM
   - distro           # distribs test
   - deploy           # trigger wayland's website generation
-  - container_clean  # clean up unused container images
+  - container_clean  # clean up unused container images (scheduled jobs only)
 
 variables:
   ###############################################################################
@@ -65,13 +69,10 @@ variables:
   # See the documentation here:                                                 #
   # https://wayland.freedesktop.org/libinput/doc/latest/building_libinput.html  #
   ###############################################################################
-  FEDORA_PACKAGES:    'git gcc gcc-c++ pkgconf-pkg-config meson check-devel libudev-devel libevdev-devel doxygen graphviz python3-sphinx python3-recommonmark python3-sphinx_rtd_theme python3-pytest-xdist libwacom-devel cairo-devel   gtk3-devel   glib2-devel    mtdev-devel diffutils'
-  FEDORA_QEMU_RPMS:   'git gcc gcc-c++ pkgconf-pkg-config meson check-devel libudev-devel libevdev-devel doxygen graphviz python3-sphinx python3-recommonmark python3-sphinx_rtd_theme python3-pytest-xdist libwacom-devel cairo-devel   gtk3-devel   glib2-devel    mtdev-devel diffutils valgrind'
-  UBUNTU_PACKAGES:    'git gcc g++     pkg-config         meson check       libudev-dev   libevdev-dev   doxygen graphviz python3-sphinx python3-recommonmark python3-sphinx-rtd-theme python3-pytest-xdist libwacom-dev   libcairo2-dev libgtk-3-dev libglib2.0-dev libmtdev-dev'
-  ARCH_PACKAGES:      'git gcc         pkgconfig          meson check       libsystemd    libevdev       doxygen graphviz python-sphinx  python-recommonmark  python-sphinx_rtd_theme  python-pytest-xdist  libwacom                     gtk3                        mtdev      diffutils'
+{% for distro in distributions %}
+  {{"%-17s" | format(distro.name.upper() + '_PACKAGES:')}} '{{ distro.packages|join(' ')}}'
+{% endfor %}
   FREEBSD_BUILD_PKGS: 'meson'
-  FREEBSD_PKGS:       'libepoll-shim                                        libudev-devd  libevdev                                                                                     libwacom                     gtk3                        libmtdev   '
-  ALPINE_PACKAGES:    'git gcc build-base pkgconfig       meson check-dev   eudev-dev     libevdev-dev                                                                                 libwacom-dev   cairo-dev     gtk+3.0-dev  mtdev-dev bash'
   ############################ end of package lists #############################
 
   # these tags should be updated each time the list of packages is updated
@@ -86,8 +87,6 @@ variables:
   QEMU_TAG:    'qemu-vm-{{distro.tag}}'
 {% endif %}
 {% endfor %}
-
-  UBUNTU_EXEC: "bash .gitlab-ci/ubuntu_install.sh $UBUNTU_CUSTOM_DEBS"
 
   FREEBSD_CONTAINER_IMAGE: $CI_REGISTRY_IMAGE/freebsd/11.2:$FREEBSD_TAG
   FDO_UPSTREAM_REPO: libinput/libinput
@@ -120,9 +119,10 @@ variables:
     reports:
       junit: $MESON_BUILDDIR/junit-*.xml
 
+
 #################################################################
 #                                                               #
-#                          prep stage                           #
+#                     sanity check stage                        #
 #                                                               #
 #################################################################
 
@@ -131,14 +131,11 @@ variables:
 # $SRCDIR/.gitlab-ci/generate-gitlab-ci.py
 #
 check-ci-script:
-  image: golang:alpine
-  stage: prep
-  before_script:
-    - apk add python3 py-pip git
-    - pip3 install git+http://gitlab.freedesktop.org/freedesktop/ci-templates
+  extends:
+    - .fdo.ci-fairy
+  stage: sanity check
   script:
-    - ci-fairy generate-template
-    - git diff --exit-code && exit 0 || true
+    - ci-fairy generate-template --verify && exit 0 || true
     - echo "Committed gitlab-ci.yml differs from generated gitlab-ci.yml. Please verify"
     - exit 1
 
@@ -147,11 +144,9 @@ check-ci-script:
 #
 
 check-commit:
-  image: golang:alpine
-  stage: prep
-  before_script:
-    - apk add python3 py-pip git
-    - pip3 install git+http://gitlab.freedesktop.org/freedesktop/ci-templates
+  extends:
+    - .fdo.ci-fairy
+  stage: sanity check
   script:
     - ci-fairy check-commits --signed-off-by --junit-xml=results.xml
   except:
@@ -162,23 +157,11 @@ check-commit:
     reports:
       junit: results.xml
 
-#
-# Verify that the merge request has the allow-collaboration checkbox ticked
-#
-
-check-merge-request:
-  image: golang:alpine
-  stage: deploy
-  before_script:
-    - apk add python3 py-pip git
-    - pip3 install git+http://gitlab.freedesktop.org/freedesktop/ci-templates
-  script:
-    - ci-fairy check-merge-request --require-allow-collaboration --junit-xml=results.xml
-  artifacts:
-    when: on_failure
-    reports:
-      junit: results.xml
-  allow_failure: true
+#################################################################
+#                                                               #
+#                          prep stage                           #
+#                                                               #
+#################################################################
 
 #
 # Note: images are rebuilt weekly with a scheduled pipeline with FDO_FORCE_REBUILD set
@@ -198,8 +181,7 @@ check-merge-request:
     GIT_STRATEGY: none
     FDO_DISTRIBUTION_VERSION: {{version}}
     FDO_DISTRIBUTION_TAG: $QEMU_TAG
-    FDO_DISTRIBUTION_PACKAGES: ${{distro.name.upper()}}_QEMU_RPMS
-  allow_failure: true
+    FDO_DISTRIBUTION_PACKAGES: ${{distro.name.upper()}}_PACKAGES
 {% endfor %}
 
 {% for distro in distributions %}
@@ -214,9 +196,6 @@ check-merge-request:
     FDO_DISTRIBUTION_VERSION: '{{version}}'
     FDO_DISTRIBUTION_PACKAGES: ${{distro.name.upper()}}_PACKAGES
     FDO_DISTRIBUTION_TAG: ${{distro.name.upper()}}_TAG
- {% if version == 'ubuntu'%}
-    FDO_DISTRIBUTION_EXEC: $UBUNTU_EXEC
- {% endif %}
 
 {% endfor %}
 {% endfor %}
@@ -252,7 +231,7 @@ check-merge-request:
     - buildcntr=$(buildah from --quiet  myfreeweb/freebsd-cross:latest)
     - $BUILDAH_RUN $buildcntr apk add --no-cache $FREEBSD_BUILD_PKGS
     - $BUILDAH_RUN $buildcntr pkg -r /freebsd update -f
-    - $BUILDAH_RUN $buildcntr pkg -r /freebsd install -y $FREEBSD_PKGS
+    - $BUILDAH_RUN $buildcntr pkg -r /freebsd install -y $FREEBSD_PACKAGES
     - buildah config --workingdir /app $buildcntr
     # tag the current container
     - $BUILDAH_COMMIT $buildcntr $FREEBSD_CONTAINER_IMAGE
@@ -286,13 +265,10 @@ freebsd:11.2@container-prep:
 # $container_image:$tag
 #
 .container-clean:
-  stage: container_clean
   extends:
     - .policy
-  image: golang:alpine
-  before_script:
-    - apk add python3 py-pip git
-    - pip3 install git+http://gitlab.freedesktop.org/freedesktop/ci-templates
+    - .fdo.ci-fairy
+  stage: container_clean
   script:
     # Go to your Profile, Settings, Access Tokens
     # Create a personal token with 'api' scope, copy the value.
@@ -314,7 +290,6 @@ freebsd:11.2@container-prep:
     - .container-clean
   variables:
     GIT_STRATEGY: none
-    {{distro.name.upper()}}_VERSION: '{{version}}'
     CURRENT_CONTAINER_IMAGE: $CI_REGISTRY_IMAGE/{{distro.name}}/$FDO_DISTRIBUTION_VERSION:$FDO_DISTRIBUTION_TAG
     FDO_DISTRIBUTION_VERSION: '{{version}}'
     FDO_DISTRIBUTION_TAG: ${{distro.name.upper()}}_TAG
@@ -364,7 +339,7 @@ freebsd:11.2@container-clean:
   extends:
     - .policy
     - .fdo.distribution-image@fedora
-  stage: VM
+  stage: test-suite
   tags:
     - kvm
   variables:
@@ -376,27 +351,25 @@ freebsd:11.2@container-clean:
     - echo "Testing $SUITES"
   script:
     # start our vm, no args required
-    - /app/start_vm.sh || (echo "Error - Failed to start the VM." && exit 1)
+    - /app/vmctl start || (echo "Error - Failed to start the VM." && exit 1)
 
     - *check_tainted
 
-    - "scp -P 5555 -r $PWD localhost:"
+    - "scp -r $PWD vm:"
     - echo "CI_JOB_ID=\"$CI_JOB_ID\"" > sshenv
     - echo "CI_JOB_NAME=\"$CI_JOB_NAME\"" >> sshenv
     - echo "MESON_ARGS=\"$MESON_ARGS\"" >> sshenv
     - echo "MESON_BUILDDIR=\"$MESON_BUILDDIR\"" >> sshenv
     - echo "MESON_TEST_ARGS=\"$MESON_TEST_ARGS $SUITES\"" >> sshenv
     - echo "NINJA_ARGS=\"$NINJA_ARGS\"" >> sshenv
-    - "scp -P 5555 sshenv localhost:~/$CI_PROJECT_NAME/.meson_environment"
-    - ssh localhost -p 5555 "cd $CI_PROJECT_NAME ; .gitlab-ci/meson-build.sh" && touch .success || true
+    - "scp sshenv vm:~/$CI_PROJECT_NAME/.meson_environment"
+    - /app/vmctl exec "cd $CI_PROJECT_NAME ; .gitlab-ci/meson-build.sh" && touch .success || true
     # no matter the results of the tests, we want to fetch the logs
-    - scp -P 5555 -r localhost:$CI_PROJECT_NAME/$MESON_BUILDDIR .
+    - scp -r vm:$CI_PROJECT_NAME/$MESON_BUILDDIR .
 
     - *check_tainted
 
-    - ssh localhost -p 5555 halt || true
-    - sleep 2
-    - pkill qemu || true
+    - /app/vmctl stop
 
     - if [[ ! -e .success ]] ;
       then
@@ -412,7 +385,6 @@ freebsd:11.2@container-clean:
     reports:
       junit: $MESON_BUILDDIR/junit-*.xml
 
-  allow_failure: true
   retry:
     max: 2
     when: script_failure
@@ -436,11 +408,12 @@ vm-{{suite.name}}:
   extends:
     - .{{distro.name}}:{{version}}@test-suite-vm
   variables:
-    SUITE_NAMES: '{{suite.suites}}'
+    SUITE_NAMES: '{{suite.suites|join(' ')}}'
 
 vm-{{suite.name}}-no-libwacom:
   extends:
     - vm-{{suite.name}}
+  stage: test-suite-no-libwacom
   variables:
     MESON_ARGS: '-Dlibwacom=false'
 
@@ -485,7 +458,8 @@ scan-build@{{distro.name}}:{{version}}:
     MESON_TEST_ARGS: ''
   before_script:
     - dnf install -y clang-analyzer findutils
-  after_script:
+  script:
+    - .gitlab-ci/meson-build.sh
     - test ! -d "$MESON_BUILDDIR"/meson-logs/scanbuild && exit 0
     - test $(find "$MESON_BUILDDIR"/meson-logs/scanbuild -maxdepth 0 ! -empty -exec echo "not empty" \; | wc -l) -eq 0 && exit 0
     - echo "Check scan-build results"
@@ -571,14 +545,38 @@ usr-bin-env-python@{{distro.name}}:{{version}}:
         /bin/false
       fi
 
-flake8@{{distro.name}}:{{version}}:
+python-format@{{distro.name}}:{{version}}:
   extends:
     - .{{distro.name}}-build@template
   before_script:
-    - dnf install -y python3-flake8
+    - dnf install -y black
   script:
-    - flake8-3 --ignore=W501,E501,W504 $(git grep -l '^#!/usr/bin/env python3')
+    - black $(git grep -l '^#!/usr/bin/env python3')
+    - git diff --exit-code || (echo "Please run Black against all Python files" && false)
 
+# A job to check we're actually running all test suites in the CI
+check-test-suites:
+  extends:
+    - .{{distro.name}}-build@template
+  before_script:
+    - dnf install -y jq
+  script:
+    - meson builddir
+    - meson introspect builddir --test | jq -r '.[].name' | grep 'libinput-test-suite' | sort > meson-testsuites
+    - |
+      cat <<EOF > ci-testsuites ;
+{% for suite in test_suites %}
+{% for name in suite.suites %}
+        libinput-test-suite-{{name}}
+{% endfor %}
+{% endfor %}
+      EOF
+    - sort -o ci-testsuites ci-testsuites
+    - diff -u8 -w ci-testsuites meson-testsuites || (echo "Some test suites are not run in the CI" && false)
+  only:
+    changes:
+      - "meson.build"
+      - ".gitlab-ci.yml"
 {% endfor %}
 
 #
@@ -596,13 +594,14 @@ flake8@{{distro.name}}:{{version}}:
 #
 coverity:
   extends:
-    - .fdo.distribution-image@fedora
+    - .fdo.distribution-image@debian
     - .policy
   stage: build
   variables:
-    # coverity doesn't work on Fedora 32
-    FDO_DISTRIBUTION_VERSION: '31'
-    FDO_DISTRIBUTION_TAG: $FEDORA_TAG
+    FDO_DISTRIBUTION_VERSION: 'stable'
+    FDO_DISTRIBUTION_TAG: $DEBIAN_TAG
+    # so git-describe works, or should work
+    GIT_DEPTH: 200
   only:
     variables:
       - $COVERITY_SCAN_TOKEN
@@ -620,8 +619,14 @@ coverity:
         --form token=$COVERITY_SCAN_TOKEN --form email=$GITLAB_USER_EMAIL
         --form file=@cov-int.tar.gz --form version="$(git describe --tags)"
         --form description="$(git describe --tags) / $CI_COMMIT_TITLE / $CI_COMMIT_REF_NAME:$CI_PIPELINE_ID"
+  artifacts:
+    name: "coverity-submit-data"
+    when: always
+    expire_in: 1 week
+    paths:
+      - cov-int.tar.gz
   needs:
-    - "fedora:31@container-prep"
+    - "debian:stable@container-prep"
 
 #################################################################
 #                                                               #
@@ -671,9 +676,27 @@ freebsd:11.2@default-build:
   needs:
     - "freebsd:11.2@container-prep"
 
+#################################################################
+#                                                               #
+#                        deploy stage                           #
+#                                                               #
+#################################################################
+
 #
-# deploy
+# Verify that the merge request has the allow-collaboration checkbox ticked
 #
+
+check-merge-request:
+  extends:
+    - .fdo.ci-fairy
+  stage: deploy
+  script:
+    - ci-fairy check-merge-request --require-allow-collaboration --junit-xml=results.xml
+  artifacts:
+    when: on_failure
+    reports:
+      junit: results.xml
+  allow_failure: true
 
 build rpm:
   extends:
@@ -699,29 +722,19 @@ build rpm:
     - meson dist --no-test
     - rpmbuild -ta meson-dist/libinput*.tar.xz
 
+
 wayland-web:
-  image: alpine:latest
   stage: deploy
-  script:
-    - apk add curl
-    # Requirements:
-    # - variable WAYLAND_WEB_TOKEN defined as type File in libinput's CI/CD settings
-    # - content of that file is the token value, as generated by the Pipeline Triggers
-    #   of the wayland.freedesktop.org project.
-    - curl --request POST
-           --form "token=<$WAYLAND_WEB_TOKEN"
-           --form ref=master
-           https://gitlab.freedesktop.org/api/v4/projects/wayland${SLASH}wayland${DOT}freedesktop${DOT}org/trigger/pipeline
+  trigger: wayland/wayland.freedesktop.org
   except:
     refs:
       - schedules
+  variables:
+    MESON_ARGS: '-Ddebug-gui=false -Dlibwacom=false -Dtests=false'
+    MESON_BUILDDIR: 'builddir'
   only:
     refs:
       - master
     variables:
       - $CI_PROJECT_PATH == "libinput/libinput"
-  dependencies: []
-  variables:
-    DOT: "%2E"
-    SLASH: "%2F"
 

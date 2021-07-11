@@ -78,6 +78,16 @@ struct test_collection {
 	}; \
 	static void (name##_setup)(void)
 
+
+/**
+ * litest itself needs the user_data to store some test-suite-specific
+ * information. Tests must not override this pointer, any data they need
+ * they can hang off the private pointer in this struct.
+ */
+struct litest_user_data {
+	void *private;
+};
+
 void
 litest_fail_condition(const char *file,
 		      int line,
@@ -306,6 +316,9 @@ enum litest_device_type {
 	LITEST_TABLET_MODE_UNRELIABLE,
 	LITEST_KEYBOARD_LOGITECH_MEDIA_KEYBOARD_ELITE,
 	LITEST_SONY_VAIO_KEYS,
+	LITEST_KEYBOARD_QUIRKED,
+	LITEST_SYNAPTICS_PRESSUREPAD,
+	LITEST_GENERIC_PRESSUREPAD,
 };
 
 #define LITEST_DEVICELESS	-2
@@ -427,20 +440,20 @@ void litest_disable_log_handler(struct libinput *libinput);
 void litest_restore_log_handler(struct libinput *libinput);
 void litest_set_log_handler_bug(struct libinput *libinput);
 
-#define litest_add(name_, func_, ...) \
-	_litest_add(name_, #func_, func_, __VA_ARGS__)
-#define litest_add_ranged(name_, func_, ...) \
-	_litest_add_ranged(name_, #func_, func_, __VA_ARGS__)
-#define litest_add_for_device(name_, func_, ...) \
-	_litest_add_for_device(name_, #func_, func_, __VA_ARGS__)
-#define litest_add_ranged_for_device(name_, func_, ...) \
-	_litest_add_ranged_for_device(name_, #func_, func_, __VA_ARGS__)
-#define litest_add_no_device(name_, func_) \
-	_litest_add_no_device(name_, #func_, func_)
-#define litest_add_ranged_no_device(name_, func_, ...) \
-	_litest_add_ranged_no_device(name_, #func_, func_, __VA_ARGS__)
-#define litest_add_deviceless(name_, func_) \
-	_litest_add_deviceless(name_, #func_, func_)
+#define litest_add(func_, ...) \
+	_litest_add(__FILE__, #func_, func_, __VA_ARGS__)
+#define litest_add_ranged(func_, ...) \
+	_litest_add_ranged(__FILE__, #func_, func_, __VA_ARGS__)
+#define litest_add_for_device(func_, ...) \
+	_litest_add_for_device(__FILE__, #func_, func_, __VA_ARGS__)
+#define litest_add_ranged_for_device(func_, ...) \
+	_litest_add_ranged_for_device(__FILE__, #func_, func_, __VA_ARGS__)
+#define litest_add_no_device(func_) \
+	_litest_add_no_device(__FILE__, #func_, func_)
+#define litest_add_ranged_no_device(func_, ...) \
+	_litest_add_ranged_no_device(__FILE__, #func_, func_, __VA_ARGS__)
+#define litest_add_deviceless(func_) \
+	_litest_add_deviceless(__FILE__, #func_, func_)
 
 void
 _litest_add(const char *name,
@@ -602,6 +615,10 @@ litest_touch_move_three_touches(struct litest_device *d,
 				double x2, double y2,
 				double dx, double dy,
 				int steps);
+
+void
+litest_tablet_set_tool_type(struct litest_device *d,
+			    unsigned int code);
 
 void
 litest_tablet_proximity_in(struct litest_device *d,
@@ -822,6 +839,12 @@ void
 litest_assert_pad_key_event(struct libinput *li,
 			    unsigned int key,
 			    enum libinput_key_state state);
+
+void
+litest_assert_gesture_event(struct libinput *li,
+			    enum libinput_event_type type,
+			    int nfingers);
+
 struct libevdev_uinput *
 litest_create_uinput_device(const char *name,
 			    struct input_id *id,
