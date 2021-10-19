@@ -471,6 +471,38 @@ START_TEST(range_prop_parser)
 }
 END_TEST
 
+START_TEST(boolean_prop_parser)
+{
+	struct parser_test_range {
+		char *tag;
+		bool success;
+		bool b;
+	} tests[] = {
+		{ "0", true, false },
+		{ "1", true, true },
+		{ "-1", false, false },
+		{ "2", false, false },
+		{ "abcd", false, false },
+		{ NULL, false, false }
+	};
+	int i;
+	bool success, b;
+
+	for (i = 0; tests[i].tag != NULL; i++) {
+		b = false;
+		success = parse_boolean_property(tests[i].tag, &b);
+		ck_assert(success == tests[i].success);
+		if (success)
+			ck_assert_int_eq(b, tests[i].b);
+		else
+			ck_assert_int_eq(b, false);
+	}
+
+	success = parse_boolean_property(NULL, NULL);
+	ck_assert(success == false);
+}
+END_TEST
+
 START_TEST(evcode_prop_parser)
 {
 	struct parser_test_tuple {
@@ -675,6 +707,7 @@ START_TEST(time_conversion)
 	ck_assert_int_eq(ns2us(10000), 10);
 	ck_assert_int_eq(ms2us(10), 10000);
 	ck_assert_int_eq(s2us(1), 1000000);
+	ck_assert_int_eq(h2us(2), s2us(2 * 60 * 60));
 	ck_assert_int_eq(us2ms(10000), 10);
 }
 END_TEST
@@ -1295,6 +1328,39 @@ START_TEST(list_test_append)
 }
 END_TEST
 
+START_TEST(list_test_foreach)
+{
+	struct list_test {
+		int val;
+		struct list node;
+	} tests[] = {
+		{ .val  = 1 },
+		{ .val  = 2 },
+		{ .val  = 3 },
+		{ .val  = 4 },
+	};
+	struct list_test *t;
+	struct list head;
+
+	list_init(&head);
+
+	ARRAY_FOR_EACH(tests, t) {
+		list_append(&head, &t->node);
+	}
+
+	/* Make sure both loop macros are a single line statement */
+	if (false)
+		list_for_each(t, &head, node) {
+			ck_abort_msg("We should not get here");
+		}
+
+	if (false)
+		list_for_each_safe(t, &head, node) {
+			ck_abort_msg("We should not get here");
+		}
+}
+END_TEST
+
 START_TEST(strverscmp_test)
 {
 	ck_assert_int_eq(libinput_strverscmp("", ""), 0);
@@ -1405,6 +1471,7 @@ litest_utils_suite(void)
 	tcase_add_test(tc, reliability_prop_parser);
 	tcase_add_test(tc, calibration_prop_parser);
 	tcase_add_test(tc, range_prop_parser);
+	tcase_add_test(tc, boolean_prop_parser);
 	tcase_add_test(tc, evcode_prop_parser);
 	tcase_add_test(tc, input_prop_parser);
 	tcase_add_test(tc, evdev_abs_parser);
@@ -1427,6 +1494,7 @@ litest_utils_suite(void)
 
 	tcase_add_test(tc, list_test_insert);
 	tcase_add_test(tc, list_test_append);
+	tcase_add_test(tc, list_test_foreach);
 	tcase_add_test(tc, strverscmp_test);
 	tcase_add_test(tc, streq_test);
 	tcase_add_test(tc, strneq_test);

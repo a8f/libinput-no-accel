@@ -254,6 +254,7 @@ quirk_get_name(enum quirk q)
 	case QUIRK_MODEL_INVERT_HORIZONTAL_SCROLLING:	return "ModelInvertHorizontalScrolling";
 	case QUIRK_MODEL_LENOVO_SCROLLPOINT:		return "ModelLenovoScrollPoint";
 	case QUIRK_MODEL_LENOVO_T450_TOUCHPAD:		return "ModelLenovoT450Touchpad";
+	case QUIRK_MODEL_LENOVO_TRACKPOINT_KEYBOARD_2:  return "ModelLenovoTrackpointKeyboard2";
 	case QUIRK_MODEL_LENOVO_X1GEN6_TOUCHPAD:	return "ModelLenovoX1Gen6Touchpad";
 	case QUIRK_MODEL_LENOVO_X230:			return "ModelLenovoX230";
 	case QUIRK_MODEL_SYNAPTICS_SERIAL_TOUCHPAD:	return "ModelSynapticsSerialTouchpad";
@@ -280,6 +281,7 @@ quirk_get_name(enum quirk q)
 	case QUIRK_ATTR_TRACKPOINT_MULTIPLIER:		return "AttrTrackpointMultiplier";
 	case QUIRK_ATTR_THUMB_PRESSURE_THRESHOLD:	return "AttrThumbPressureThreshold";
 	case QUIRK_ATTR_USE_VELOCITY_AVERAGING:		return "AttrUseVelocityAveraging";
+	case QUIRK_ATTR_TABLET_SMOOTHING:               return "AttrTabletSmoothing";
 	case QUIRK_ATTR_THUMB_SIZE_THRESHOLD:		return "AttrThumbSizeThreshold";
 	case QUIRK_ATTR_MSC_TIMESTAMP:			return "AttrMscTimestamp";
 	case QUIRK_ATTR_EVENT_CODE_DISABLE:		return "AttrEventCodeDisable";
@@ -658,11 +660,7 @@ parse_model(struct quirks_context *ctx,
 
 	assert(strneq(key, "Model", 5));
 
-	if (streq(value, "1"))
-		b = true;
-	else if (streq(value, "0"))
-		b = false;
-	else
+	if (!parse_boolean_property(value, &b))
 		return false;
 
 	do {
@@ -787,11 +785,14 @@ parse_attr(struct quirks_context *ctx,
 		rc = true;
 	} else if (streq(key, quirk_get_name(QUIRK_ATTR_USE_VELOCITY_AVERAGING))) {
 		p->id = QUIRK_ATTR_USE_VELOCITY_AVERAGING;
-		if (streq(value, "1"))
-			b = true;
-		else if (streq(value, "0"))
-			b = false;
-		else
+		if (!parse_boolean_property(value, &b))
+			goto out;
+		p->type = PT_BOOL;
+		p->value.b = b;
+		rc = true;
+	} else if (streq(key, quirk_get_name(QUIRK_ATTR_TABLET_SMOOTHING))) {
+		p->id = QUIRK_ATTR_TABLET_SMOOTHING;
+		if (!parse_boolean_property(value, &b))
 			goto out;
 		p->type = PT_BOOL;
 		p->value.b = b;

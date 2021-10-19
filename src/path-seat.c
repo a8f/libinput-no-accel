@@ -139,7 +139,7 @@ path_seat_get_for_device(struct path_input *input,
 		seat_logical_name = safe_strdup(seat_logical_name_override);
 	} else {
 		seat_prop = udev_device_get_property_value(udev_device, "WL_SEAT");
-		seat_logical_name = strdup(seat_prop ? seat_prop : default_seat_name);
+		seat_logical_name = safe_strdup(seat_prop ? seat_prop : default_seat_name);
 	}
 
 	if (!seat_logical_name) {
@@ -414,7 +414,7 @@ libinput_path_remove_device(struct libinput_device *device)
 		return;
 	}
 
-	list_for_each(dev, &input->path_list, link) {
+	list_for_each_safe(dev, &input->path_list, link) {
 		if (dev->udev_device == evdev->udev_device) {
 			path_device_destroy(dev);
 			break;

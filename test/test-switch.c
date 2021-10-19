@@ -286,6 +286,7 @@ START_TEST(switch_disable_touchpad)
 
 	touchpad = switch_init_paired_touchpad(li);
 	litest_disable_tap(touchpad->libinput_device);
+	litest_disable_hold_gestures(touchpad->libinput_device);
 	litest_drain_events(li);
 
 	litest_grab_device(sw);
@@ -325,6 +326,7 @@ START_TEST(switch_disable_touchpad_during_touch)
 
 	touchpad = switch_init_paired_touchpad(li);
 	litest_disable_tap(touchpad->libinput_device);
+	litest_disable_hold_gestures(touchpad->libinput_device);
 	litest_drain_events(li);
 
 	litest_touch_down(touchpad, 0, 50, 50);
@@ -404,18 +406,17 @@ START_TEST(switch_disable_touchpad_edge_scroll_interrupt)
 	litest_timeout_edgescroll();
 	litest_touch_move_to(touchpad, 0, 99, 20, 99, 30, 10);
 	libinput_dispatch(li);
-	litest_assert_only_typed_events(li, LIBINPUT_EVENT_POINTER_AXIS);
+	litest_assert_only_axis_events(li, LIBINPUT_EVENT_POINTER_SCROLL_FINGER);
 
 	litest_grab_device(sw);
 	litest_switch_action(sw, which, LIBINPUT_SWITCH_STATE_ON);
 	litest_ungrab_device(sw);
 	libinput_dispatch(li);
 
-	event = libinput_get_event(li);
-	litest_is_axis_event(event,
-			     LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL,
-			     LIBINPUT_POINTER_AXIS_SOURCE_FINGER);
-	libinput_event_destroy(event);
+	litest_assert_axis_end_sequence(li,
+					LIBINPUT_EVENT_POINTER_SCROLL_FINGER,
+					LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL,
+					LIBINPUT_POINTER_AXIS_SOURCE_FINGER);
 
 	event = libinput_get_event(li);
 	litest_is_switch_event(event, which, LIBINPUT_SWITCH_STATE_ON);
@@ -438,6 +439,7 @@ START_TEST(switch_disable_touchpad_already_open)
 	touchpad = switch_init_paired_touchpad(li);
 
 	litest_disable_tap(touchpad->libinput_device);
+	litest_disable_hold_gestures(touchpad->libinput_device);
 	litest_drain_events(li);
 
 	/* default: switch is off - motion events */
@@ -471,6 +473,7 @@ START_TEST(switch_dont_resume_disabled_touchpad)
 
 	touchpad = switch_init_paired_touchpad(li);
 	litest_disable_tap(touchpad->libinput_device);
+	litest_disable_hold_gestures(touchpad->libinput_device);
 	libinput_device_config_send_events_set_mode(touchpad->libinput_device,
 						    LIBINPUT_CONFIG_SEND_EVENTS_DISABLED);
 	litest_drain_events(li);
@@ -512,6 +515,7 @@ START_TEST(switch_dont_resume_disabled_touchpad_external_mouse)
 	touchpad = switch_init_paired_touchpad(li);
 	mouse = litest_add_device(li, LITEST_MOUSE);
 	litest_disable_tap(touchpad->libinput_device);
+	litest_disable_hold_gestures(touchpad->libinput_device);
 	libinput_device_config_send_events_set_mode(touchpad->libinput_device,
 						    LIBINPUT_CONFIG_SEND_EVENTS_DISABLED_ON_EXTERNAL_MOUSE);
 	litest_drain_events(li);
@@ -601,6 +605,8 @@ START_TEST(lid_open_on_key_touchpad_enabled)
 
 	keyboard = litest_add_device(li, LITEST_KEYBOARD);
 	touchpad = litest_add_device(li, LITEST_SYNAPTICS_I2C);
+
+	litest_disable_hold_gestures(touchpad->libinput_device);
 
 	litest_grab_device(sw);
 	litest_switch_action(sw,
@@ -928,6 +934,7 @@ START_TEST(tablet_mode_disable_touchpad_on_init)
 	/* touchpad comes with switch already on - no events */
 	touchpad = switch_init_paired_touchpad(li);
 	litest_disable_tap(touchpad->libinput_device);
+	litest_disable_hold_gestures(touchpad->libinput_device);
 	litest_drain_events(li);
 
 	litest_touch_down(touchpad, 0, 50, 50);
@@ -963,6 +970,7 @@ START_TEST(tablet_mode_disable_touchpad_on_resume)
 
 	touchpad = switch_init_paired_touchpad(li);
 	litest_disable_tap(touchpad->libinput_device);
+	litest_disable_hold_gestures(touchpad->libinput_device);
 	litest_drain_events(li);
 
 	libinput_suspend(li);
@@ -1050,6 +1058,10 @@ START_TEST(tablet_mode_enable_touchpad_on_resume)
 	litest_touch_down(touchpad, 0, 50, 50);
 	litest_touch_move_to(touchpad, 0, 50, 50, 70, 50, 10);
 	litest_touch_up(touchpad, 0);
+	litest_drain_events_of_type(li,
+				    LIBINPUT_EVENT_GESTURE_HOLD_BEGIN,
+				    LIBINPUT_EVENT_GESTURE_HOLD_END,
+				    -1);
 	litest_assert_only_typed_events(li, LIBINPUT_EVENT_POINTER_MOTION);
 
 	litest_switch_action(sw,

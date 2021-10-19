@@ -6,6 +6,10 @@
 #                                      #
 ########################################
 
+# To change the gitlab CI, edit .gitlab-ci/ci.template and/or .gitlab-ci/config.yaml
+# and run ci-fairy generate-template. For details, see
+# https://freedesktop.pages.freedesktop.org/ci-templates/ci-fairy.html#templating-gitlab-ci-yml
+
 # This is a bit complicated for two reasons:
 # - we really want to run dnf/apt/... only once, updating on the test runner for
 #   each job takes forever. So we create a container image for each distribution
@@ -30,7 +34,7 @@
 # <distribution>:<version>@activity:
 #  e.g. fedora:31@build-default
 
-.templates_sha: &template_sha 18194044f0f984c8815bc9a1a146582f6bf15d41 # see https://docs.gitlab.com/ee/ci/yaml/#includefile
+.templates_sha: &template_sha 007f3e2fe2235328e77d3cd4ce007ab41cd9ce6c
 
 include:
   # Alpine container builder template
@@ -49,6 +53,10 @@ include:
   - project: 'freedesktop/ci-templates'
     ref: *template_sha
     file: '/templates/fedora.yml'
+  # Freebsd container builder template
+  - project: 'freedesktop/ci-templates'
+    ref: *template_sha
+    file: '/templates/freebsd.yml'
   # Ubuntu container builder template
   - project: 'freedesktop/ci-templates'
     ref: *template_sha
@@ -79,28 +87,27 @@ variables:
   # See the documentation here:                                                 #
   # https://wayland.freedesktop.org/libinput/doc/latest/building_libinput.html  #
   ###############################################################################
-  FEDORA_PACKAGES:  'git-core gcc gcc-c++ pkgconf-pkg-config meson check-devel libudev-devel libevdev-devel doxygen graphviz python3-sphinx python3-recommonmark python3-sphinx_rtd_theme python3-pytest-xdist libwacom-devel cairo-devel gtk3-devel glib2-devel mtdev-devel diffutils valgrind'
+  FEDORA_PACKAGES:  'git-core gcc gcc-c++ pkgconf-pkg-config meson check-devel libudev-devel libevdev-devel doxygen graphviz python3-sphinx python3-recommonmark python3-sphinx_rtd_theme python3-pytest-xdist libwacom-devel cairo-devel gtk4-devel glib2-devel mtdev-devel diffutils valgrind'
   DEBIAN_PACKAGES:  'git gcc g++ pkg-config meson check libudev-dev libevdev-dev doxygen graphviz python3-sphinx python3-recommonmark python3-sphinx-rtd-theme python3-pytest-xdist libwacom-dev libcairo2-dev libgtk-3-dev libglib2.0-dev libmtdev-dev curl'
   UBUNTU_PACKAGES:  'git gcc g++ pkg-config meson check libudev-dev libevdev-dev doxygen graphviz python3-sphinx python3-recommonmark python3-sphinx-rtd-theme python3-pytest-xdist libwacom-dev libcairo2-dev libgtk-3-dev libglib2.0-dev libmtdev-dev'
-  ARCH_PACKAGES:    'git gcc pkgconfig meson check libsystemd libevdev doxygen graphviz python-sphinx python-recommonmark python-sphinx_rtd_theme python-pytest-xdist libwacom gtk3 mtdev diffutils'
-  ALPINE_PACKAGES:  'git gcc build-base pkgconfig meson check-dev eudev-dev libevdev-dev libwacom-dev cairo-dev gtk+3.0-dev mtdev-dev bash'
-  FREEBSD_PACKAGES: 'libepoll-shim libudev-devd libevdev libwacom gtk3 libmtdev'
-  FREEBSD_BUILD_PKGS: 'meson'
+  ARCH_PACKAGES:    'git gcc pkgconfig meson check libsystemd libevdev doxygen graphviz python-sphinx python-recommonmark python-sphinx_rtd_theme python-pytest-xdist libwacom gtk4 mtdev diffutils'
+  ALPINE_PACKAGES:  'git gcc build-base pkgconfig meson check-dev eudev-dev libevdev-dev libwacom-dev cairo-dev gtk4.0-dev mtdev-dev bash'
+  FREEBSD_PACKAGES: 'git pkgconf meson libepoll-shim libudev-devd libevdev libwacom gtk3 libmtdev bash wayland'
   ############################ end of package lists #############################
 
   # these tags should be updated each time the list of packages is updated
   # changing these will force rebuilding the associated image
   # Note: these tags have no meaning and are not tied to a particular
   # libinput version
-  FEDORA_TAG:  '2021-01-04.1'
-  DEBIAN_TAG:  '2021-01-04.1'
-  UBUNTU_TAG:  '2021-01-04.1'
-  ARCH_TAG:    '2021-01-04.1'
-  ALPINE_TAG:  '2021-01-04.1'
-  FREEBSD_TAG: '2021-01-04.1'
-  QEMU_TAG:    'qemu-vm-2021-01-04.1'
+  FEDORA_TAG:  '2021-07-30.0'
+  DEBIAN_TAG:  '2021-07-30.0'
+  UBUNTU_TAG:  '2021-07-30.0'
+  ARCH_TAG:    '2021-07-30.0'
+  ALPINE_TAG:  '2021-07-30.0'
+  FREEBSD_TAG: '2021-07-30.0'
+  FEDORA_QEMU_TAG:     'fedora-qemu-vm-2021-07-30.0'
+  FREEBSD_QEMU_TAG:    'freebsd-qemu-vm-2021-07-30.0'
 
-  FREEBSD_CONTAINER_IMAGE: $CI_REGISTRY_IMAGE/freebsd/11.2:$FREEBSD_TAG
   FDO_UPSTREAM_REPO: libinput/libinput
 
   MESON_BUILDDIR: "build dir"
@@ -120,6 +127,7 @@ variables:
       - stuck_or_timeout_failure
   # cancel run when a newer version is pushed to the branch
   interruptible: true
+  dependencies: []
 
 .default_artifacts:
   artifacts:
@@ -148,7 +156,10 @@ check-ci-script:
   stage: sanity check
   script:
     - ci-fairy generate-template --verify && exit 0 || true
-    - echo "Committed gitlab-ci.yml differs from generated gitlab-ci.yml. Please verify"
+    - >
+      printf "%s\n" \
+        "Committed gitlab-ci.yml differs from generated gitlab-ci.yml. Please verify" \
+        "https://wayland.freedesktop.org/libinput/doc/latest/contributing.html"
     - exit 1
 
 #
@@ -160,9 +171,14 @@ check-commit:
     - .fdo.ci-fairy
   stage: sanity check
   script:
-    - ci-fairy check-commits --signed-off-by --junit-xml=results.xml
+    - ci-fairy check-commits --signed-off-by --junit-xml=results.xml && exit 0 || true
+    - >
+      printf "%s\n" \
+        "Error checking commit format. Please verify" \
+        "https://wayland.freedesktop.org/libinput/doc/latest/contributing.html"
+    - exit 1
   except:
-    - master@libinput/libinput
+    - main@libinput/libinput
   variables:
     GIT_DEPTH: 100
   artifacts:
@@ -179,7 +195,7 @@ check-commit:
 # Note: images are rebuilt weekly with a scheduled pipeline with FDO_FORCE_REBUILD set
 #
 #
-fedora:33@qemu-prep:
+fedora:34@qemu-prep:
   extends:
     - .fdo.qemu-build@fedora
     - .policy
@@ -188,26 +204,25 @@ fedora:33@qemu-prep:
     - kvm
   variables:
     GIT_STRATEGY: none
-    FDO_DISTRIBUTION_VERSION: 33
-    FDO_DISTRIBUTION_TAG: $QEMU_TAG
+    FDO_DISTRIBUTION_VERSION: "34"
+    FDO_DISTRIBUTION_TAG: $FEDORA_QEMU_TAG
     FDO_DISTRIBUTION_PACKAGES: $FEDORA_PACKAGES
 
-<<<<<<< HEAD
-fedora:31@container-prep:
-=======
-fedora:32@container-prep:
+freebsd:13.0@qemu-prep:
   extends:
-    - .fdo.container-build@fedora
+    - .fdo.qemu-build@freebsd
     - .policy
   stage: prep
+  tags:
+    - kvm
   variables:
     GIT_STRATEGY: none
-    FDO_DISTRIBUTION_VERSION: '32'
-    FDO_DISTRIBUTION_PACKAGES: $FEDORA_PACKAGES
-    FDO_DISTRIBUTION_TAG: $FEDORA_TAG
+    FDO_DISTRIBUTION_VERSION: "13.0"
+    FDO_DISTRIBUTION_TAG: $FREEBSD_QEMU_TAG
+    FDO_DISTRIBUTION_PACKAGES: $FREEBSD_PACKAGES
+
 
 fedora:33@container-prep:
->>>>>>> upstream/master
   extends:
     - .fdo.container-build@fedora
     - .policy
@@ -215,6 +230,17 @@ fedora:33@container-prep:
   variables:
     GIT_STRATEGY: none
     FDO_DISTRIBUTION_VERSION: '33'
+    FDO_DISTRIBUTION_PACKAGES: $FEDORA_PACKAGES
+    FDO_DISTRIBUTION_TAG: $FEDORA_TAG
+
+fedora:34@container-prep:
+  extends:
+    - .fdo.container-build@fedora
+    - .policy
+  stage: prep
+  variables:
+    GIT_STRATEGY: none
+    FDO_DISTRIBUTION_VERSION: '34'
     FDO_DISTRIBUTION_PACKAGES: $FEDORA_PACKAGES
     FDO_DISTRIBUTION_TAG: $FEDORA_TAG
 
@@ -275,57 +301,6 @@ alpine:latest@container-prep:
 
 
 
-# Note that we want to use the latest buildah image, and for that
-# we use one of the .fdo.container-build@distribution by replacing the
-# `script`.
-.freebsd@container-prep:
-  extends:
-    - .policy
-    - .fdo.container-build@fedora
-  stage: prep
-  script:
-    # log in to the registry
-    - podman login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-
-    # get the full container image name
-    - export IMAGE=freebsd/$FREEBSD_VERSION:$FREEBSD_TAG
-
-    - if [[ x"$FDO_FORCE_REBUILD" != x ]] ; then touch .rebuild; fi
-
-    # pull the latest upstream image if it exists
-    - test -e .rebuild || skopeo copy --dest-creds $CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD
-                                 docker://$CI_REGISTRY/$FDO_UPSTREAM_REPO/$IMAGE
-                                 docker://$CI_REGISTRY_IMAGE/$IMAGE && exit 0 || true ;
-
-    # check if our image is already in the current registry
-    - test -e .rebuild || skopeo inspect docker://$CI_REGISTRY_IMAGE/$IMAGE > /dev/null && exit 0 || true ;
-
-    - export BUILDAH_RUN="buildah run --isolation chroot"
-    - export BUILDAH_COMMIT="buildah commit --format docker"
-    - buildcntr=$(buildah from --quiet  myfreeweb/freebsd-cross:latest)
-    - $BUILDAH_RUN $buildcntr apk add --no-cache $FREEBSD_BUILD_PKGS
-    - $BUILDAH_RUN $buildcntr pkg -r /freebsd update -f
-    - $BUILDAH_RUN $buildcntr pkg -r /freebsd install -y $FREEBSD_PACKAGES
-    - buildah config --workingdir /app $buildcntr
-    # tag the current container
-    - $BUILDAH_COMMIT $buildcntr $FREEBSD_CONTAINER_IMAGE
-    # clean up the working container
-    - buildah rm $buildcntr
-
-    # push the container image to the libinput registry
-    - podman push --quiet $FREEBSD_CONTAINER_IMAGE
-    - skopeo copy --dest-creds $CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD
-        docker://$FREEBSD_CONTAINER_IMAGE
-        docker://$CI_REGISTRY_IMAGE/freebsd/$FREEBSD_VERSION:$CI_JOB_ID
-
-freebsd:11.2@container-prep:
-  extends:
-    - .freebsd@container-prep
-  variables:
-    GIT_STRATEGY: none
-    FREEBSD_VERSION: "11.2"
-
-
 #################################################################
 #                                                               #
 #                   container clean stage                       #
@@ -352,26 +327,13 @@ freebsd:11.2@container-prep:
     - ci-fairy -v --authfile $AUTHFILE delete-image
             --repository $FDO_DISTRIBUTION_NAME/$FDO_DISTRIBUTION_VERSION
             --exclude-tag $FDO_DISTRIBUTION_TAG
-  dependencies: []
   allow_failure: true
   only:
     - schedules
 
-<<<<<<< HEAD
-fedora:31@container-clean:
-=======
-fedora:32@container-clean:
-  extends:
-    - .container-clean
-  variables:
-    GIT_STRATEGY: none
-    CURRENT_CONTAINER_IMAGE: $CI_REGISTRY_IMAGE/fedora/$FDO_DISTRIBUTION_VERSION:$FDO_DISTRIBUTION_TAG
-    FDO_DISTRIBUTION_VERSION: '32'
-    FDO_DISTRIBUTION_TAG: $FEDORA_TAG
-
 fedora:33@container-clean:
->>>>>>> upstream/master
   extends:
+    - .policy
     - .container-clean
   variables:
     GIT_STRATEGY: none
@@ -379,8 +341,19 @@ fedora:33@container-clean:
     FDO_DISTRIBUTION_VERSION: '33'
     FDO_DISTRIBUTION_TAG: $FEDORA_TAG
 
+fedora:34@container-clean:
+  extends:
+    - .policy
+    - .container-clean
+  variables:
+    GIT_STRATEGY: none
+    CURRENT_CONTAINER_IMAGE: $CI_REGISTRY_IMAGE/fedora/$FDO_DISTRIBUTION_VERSION:$FDO_DISTRIBUTION_TAG
+    FDO_DISTRIBUTION_VERSION: '34'
+    FDO_DISTRIBUTION_TAG: $FEDORA_TAG
+
 debian:stable@container-clean:
   extends:
+    - .policy
     - .container-clean
   variables:
     GIT_STRATEGY: none
@@ -390,6 +363,7 @@ debian:stable@container-clean:
 
 ubuntu:20.10@container-clean:
   extends:
+    - .policy
     - .container-clean
   variables:
     GIT_STRATEGY: none
@@ -399,6 +373,7 @@ ubuntu:20.10@container-clean:
 
 ubuntu:21.04@container-clean:
   extends:
+    - .policy
     - .container-clean
   variables:
     GIT_STRATEGY: none
@@ -408,6 +383,7 @@ ubuntu:21.04@container-clean:
 
 arch:rolling@container-clean:
   extends:
+    - .policy
     - .container-clean
   variables:
     GIT_STRATEGY: none
@@ -417,6 +393,7 @@ arch:rolling@container-clean:
 
 alpine:latest@container-clean:
   extends:
+    - .policy
     - .container-clean
   variables:
     GIT_STRATEGY: none
@@ -424,13 +401,6 @@ alpine:latest@container-clean:
     FDO_DISTRIBUTION_VERSION: 'latest'
     FDO_DISTRIBUTION_TAG: $ALPINE_TAG
 
-
-freebsd:11.2@container-clean:
-  extends:
-    - .container-clean
-  variables:
-    GIT_STRATEGY: none
-    CURRENT_CONTAINER_IMAGE: $FREEBSD_CONTAINER_IMAGE
 
 #################################################################
 #                                                               #
@@ -445,7 +415,6 @@ freebsd:11.2@container-clean:
   stage: build
   script:
     - .gitlab-ci/meson-build.sh
-  dependencies: []
 
 #
 # Fedora
@@ -459,24 +428,15 @@ freebsd:11.2@container-clean:
     exit 1 ;
   fi
 
-# Run in a test suite. Special variables:
-# - SUITES: the meson test suites to run, or
-# - SUITE_NAMES: all elements will be expanded to libinput-test-suite-$value
-# Set one or the other, not both.
-.test-suite-vm:
+# Run meson and meson test in the qemu image
+.build-in-qemu@template:
   extends:
     - .policy
     - .fdo.distribution-image@fedora
-  stage: test-suite
   tags:
     - kvm
   variables:
     MESON_BUILDDIR: build_dir
-    # remove the global --no-suite=hardware
-    MESON_TEST_ARGS: ''
-  before_script:
-    - if ! [[ -z $SUITE_NAMES ]]; then SUITES=$(echo $SUITE_NAMES | sed 's/\([^ ]*\)/libinput-test-suite-\1/g'); fi
-    - echo "Testing $SUITES"
   script:
     # start our vm, no args required
     - /app/vmctl start || (echo "Error - Failed to start the VM." && exit 1)
@@ -488,7 +448,7 @@ freebsd:11.2@container-clean:
     - echo "CI_JOB_NAME=\"$CI_JOB_NAME\"" >> sshenv
     - echo "MESON_ARGS=\"$MESON_ARGS\"" >> sshenv
     - echo "MESON_BUILDDIR=\"$MESON_BUILDDIR\"" >> sshenv
-    - echo "MESON_TEST_ARGS=\"$MESON_TEST_ARGS $SUITES\"" >> sshenv
+    - echo "MESON_TEST_ARGS=\"$MESON_TEST_ARGS\"" >> sshenv
     - echo "NINJA_ARGS=\"$NINJA_ARGS\"" >> sshenv
     - "scp sshenv vm:~/$CI_PROJECT_NAME/.meson_environment"
     - /app/vmctl exec "cd $CI_PROJECT_NAME ; .gitlab-ci/meson-build.sh" && touch .success || true
@@ -513,24 +473,40 @@ freebsd:11.2@container-clean:
     reports:
       junit: $MESON_BUILDDIR/junit-*.xml
 
+
+# Run in a test suite. Special variables:
+# - SUITES: the meson test suites to run, or
+# - SUITE_NAMES: all elements will be expanded to libinput-test-suite-$value
+# Set one or the other, not both.
+.test-suite-vm:
+  extends:
+    - .build-in-qemu@template
+  stage: test-suite
+  variables:
+    # remove the global --no-suite=hardware
+    MESON_TEST_ARGS: ''
+  before_script:
+    - if ! [[ -z $SUITE_NAMES ]]; then SUITES=$(echo $SUITE_NAMES | sed 's/\([^ ]*\)/libinput-test-suite-\1/g'); fi
+    - echo "Testing $SUITES"
+    - export MESON_TEST_ARGS="$MESON_TEST_ARGS $SUITES"
   retry:
     max: 2
     when: script_failure
 
 
-.fedora:33@test-suite-vm:
+.fedora:34@test-suite-vm:
   extends:
     - .test-suite-vm
   variables:
-    FDO_DISTRIBUTION_VERSION: 33
-    FDO_DISTRIBUTION_TAG: $QEMU_TAG
+    FDO_DISTRIBUTION_VERSION: 34
+    FDO_DISTRIBUTION_TAG: $FEDORA_QEMU_TAG
   needs:
-    - "fedora:33@qemu-prep"
+    - "fedora:34@qemu-prep"
 
 
 vm-touchpad:
   extends:
-    - .fedora:33@test-suite-vm
+    - .fedora:34@test-suite-vm
   variables:
     SUITE_NAMES: 'touchpad'
 
@@ -543,7 +519,7 @@ vm-touchpad-no-libwacom:
 
 vm-tap:
   extends:
-    - .fedora:33@test-suite-vm
+    - .fedora:34@test-suite-vm
   variables:
     SUITE_NAMES: 'touchpad-tap'
 
@@ -556,7 +532,7 @@ vm-tap-no-libwacom:
 
 vm-touchpad-buttons:
   extends:
-    - .fedora:33@test-suite-vm
+    - .fedora:34@test-suite-vm
   variables:
     SUITE_NAMES: 'touchpad-buttons'
 
@@ -569,7 +545,7 @@ vm-touchpad-buttons-no-libwacom:
 
 vm-tablet:
   extends:
-    - .fedora:33@test-suite-vm
+    - .fedora:34@test-suite-vm
   variables:
     SUITE_NAMES: 'tablet'
 
@@ -582,7 +558,7 @@ vm-tablet-no-libwacom:
 
 vm-gestures-device:
   extends:
-    - .fedora:33@test-suite-vm
+    - .fedora:34@test-suite-vm
   variables:
     SUITE_NAMES: 'gestures device'
 
@@ -595,7 +571,7 @@ vm-gestures-device-no-libwacom:
 
 vm-backends:
   extends:
-    - .fedora:33@test-suite-vm
+    - .fedora:34@test-suite-vm
   variables:
     SUITE_NAMES: 'path udev'
 
@@ -608,7 +584,7 @@ vm-backends-no-libwacom:
 
 vm-misc:
   extends:
-    - .fedora:33@test-suite-vm
+    - .fedora:34@test-suite-vm
   variables:
     SUITE_NAMES: 'log misc quirks'
 
@@ -621,7 +597,7 @@ vm-misc-no-libwacom:
 
 vm-other devices:
   extends:
-    - .fedora:33@test-suite-vm
+    - .fedora:34@test-suite-vm
   variables:
     SUITE_NAMES: 'keyboard pad switch trackball trackpoint totem touch'
 
@@ -634,7 +610,7 @@ vm-other devices-no-libwacom:
 
 vm-pointer:
   extends:
-    - .fedora:33@test-suite-vm
+    - .fedora:34@test-suite-vm
   variables:
     SUITE_NAMES: 'pointer'
 
@@ -715,12 +691,12 @@ vm-valgrind-pointer:
     - .fdo.distribution-image@fedora
     - .build@template
   variables:
-    FDO_DISTRIBUTION_VERSION: '33'
+    FDO_DISTRIBUTION_VERSION: '34'
     FDO_DISTRIBUTION_TAG: $FEDORA_TAG
   needs:
-    - "fedora:33@container-prep"
+    - "fedora:34@container-prep"
 
-default-build-release@fedora:33:
+default-build-release@fedora:34:
   stage: distro
   extends:
     - .fedora-build@template
@@ -728,32 +704,32 @@ default-build-release@fedora:33:
     MESON_ARGS: "-Dbuildtype=release"
     CFLAGS: "-Werror"
 
-scan-build@fedora:33:
+scan-build@fedora:34:
   extends:
     - .fedora-build@template
   variables:
-    NINJA_ARGS: scan-build
+    NINJA_ARGS: ''
     MESON_TEST_ARGS: ''
   before_script:
-    - dnf install -y clang-analyzer findutils
+    - dnf install -y clang-analyzer
   script:
     - .gitlab-ci/meson-build.sh
-    - test ! -d "$MESON_BUILDDIR"/meson-logs/scanbuild && exit 0
-    - test $(find "$MESON_BUILDDIR"/meson-logs/scanbuild -maxdepth 0 ! -empty -exec echo "not empty" \; | wc -l) -eq 0 && exit 0
-    - echo "Check scan-build results"
-    - /bin/false
+    - export SCANBUILD="$PWD/.gitlab-ci/scanbuild-wrapper.sh"
+    - ninja -C "$MESON_BUILDDIR" scan-build
+  after_script:
+    - .gitlab-ci/scanbuild-plist-to-junit.py "$MESON_BUILDDIR"/meson-logs/scanbuild/ > "$MESON_BUILDDIR"/junit-scan-build.xml
 
 # Below jobs are build option combinations. We only
 # run them on one image, they shouldn't fail on one distro
 # when they succeed on another.
 
-build-no-libwacom@fedora:33:
+build-no-libwacom@fedora:34:
   extends:
     - .fedora-build@template
   variables:
     MESON_ARGS: "-Dlibwacom=false"
 
-build-no-libwacom-nodeps@fedora:33:
+build-no-libwacom-nodeps@fedora:34:
   extends:
     - .fedora-build@template
   variables:
@@ -761,13 +737,13 @@ build-no-libwacom-nodeps@fedora:33:
   before_script:
     - dnf remove -y libwacom libwacom-devel
 
-build-no-docs@fedora:33:
+build-docs@fedora:34:
   extends:
     - .fedora-build@template
   variables:
-    MESON_ARGS: "-Ddocumentation=false"
+    MESON_ARGS: "-Ddocumentation=true"
 
-build-no-docs-nodeps@fedora:33:
+build-no-docs-nodeps@fedora:34:
   extends:
     - .fedora-build@template
   variables:
@@ -775,13 +751,13 @@ build-no-docs-nodeps@fedora:33:
   before_script:
     - dnf remove -y doxygen graphviz
 
-build-no-debuggui@fedora:33:
+build-no-debuggui@fedora:34:
   extends:
     - .fedora-build@template
   variables:
     MESON_ARGS: "-Ddebug-gui=false"
 
-build-no-debuggui-nodeps@fedora:33:
+build-no-debuggui-nodeps@fedora:34:
   extends:
     - .fedora-build@template
   variables:
@@ -789,13 +765,13 @@ build-no-debuggui-nodeps@fedora:33:
   before_script:
     - dnf remove -y gtk3-devel
 
-build-no-tests@fedora:33:
+build-no-tests@fedora:34:
   extends:
     - .fedora-build@template
   variables:
     MESON_ARGS: "-Dtests=false"
 
-build-no-tests-nodeps@fedora:33:
+build-no-tests-nodeps@fedora:34:
   extends:
     - .fedora-build@template
   variables:
@@ -803,7 +779,7 @@ build-no-tests-nodeps@fedora:33:
   before_script:
     - dnf remove -y check-devel
 
-valgrind@fedora:33:
+valgrind@fedora:34:
   extends:
     - .fedora-build@template
   variables:
@@ -813,7 +789,7 @@ valgrind@fedora:33:
 
 # Python checks, only run on Fedora
 
-usr-bin-env-python@fedora:33:
+usr-bin-env-python@fedora:34:
   extends:
     - .fedora-build@template
   script:
@@ -823,7 +799,7 @@ usr-bin-env-python@fedora:33:
         /bin/false
       fi
 
-python-format@fedora:33:
+python-format@fedora:34:
   extends:
     - .fedora-build@template
   before_script:
@@ -925,23 +901,7 @@ coverity:
 #                                                               #
 #################################################################
 
-<<<<<<< HEAD
-fedora:31@default-build:
-=======
-fedora:32@default-build:
-  stage: distro
-  extends:
-    - .build@template
-    - .fdo.distribution-image@fedora
-  variables:
-    FDO_DISTRIBUTION_VERSION: '32'
-    FDO_DISTRIBUTION_TAG: $FEDORA_TAG
-  needs:
-    - "fedora:32@container-prep"
-
-
 fedora:33@default-build:
->>>>>>> upstream/master
   stage: distro
   extends:
     - .build@template
@@ -951,6 +911,18 @@ fedora:33@default-build:
     FDO_DISTRIBUTION_TAG: $FEDORA_TAG
   needs:
     - "fedora:33@container-prep"
+
+
+fedora:34@default-build:
+  stage: distro
+  extends:
+    - .build@template
+    - .fdo.distribution-image@fedora
+  variables:
+    FDO_DISTRIBUTION_VERSION: '34'
+    FDO_DISTRIBUTION_TAG: $FEDORA_TAG
+  needs:
+    - "fedora:34@container-prep"
 
 
 debian:stable@default-build:
@@ -1015,25 +987,19 @@ alpine:latest@default-build:
     - "alpine:latest@container-prep"
 
 
-
-#
-# FreeBSD
-#
-.freebsd@template:
+freebsd:13.0@default-build:
   stage: distro
   extends:
-    - .build@template
-  image: $FREEBSD_CONTAINER_IMAGE
+    - .build-in-qemu@template
+    - .fdo.distribution-image@freebsd
   variables:
-    MESON_ARGS: '--cross-file freebsd -Ddocumentation=false -Dtests=false -Depoll-dir=/freebsd/usr/local/'
-    # Can't run FreeBSD tests on Linux machine, so MESON_TEST_ARGS shouldn't be "test"
-    MESON_TEST_ARGS: ''
-
-freebsd:11.2@default-build:
-  extends:
-    - .freebsd@template
+    FDO_DISTRIBUTION_VERSION: '13.0'
+    FDO_DISTRIBUTION_TAG: $FREEBSD_QEMU_TAG
+    MESON_ARGS: '-Dtests=false -Ddocumentation=false' # doxygen drags down too many deps
+    MESON_TEST_ARGS: '' # test suite doesn't work on BSD yet
   needs:
-    - "freebsd:11.2@container-prep"
+    - "freebsd:13.0@qemu-prep"
+
 
 #################################################################
 #                                                               #
@@ -1048,6 +1014,7 @@ freebsd:11.2@default-build:
 check-merge-request:
   extends:
     - .fdo.ci-fairy
+    - .policy
   stage: deploy
   script:
     - ci-fairy check-merge-request --require-allow-collaboration --junit-xml=results.xml
@@ -1063,10 +1030,10 @@ build rpm:
     - .policy
   stage: deploy
   variables:
-    FDO_DISTRIBUTION_VERSION: '32'
+    FDO_DISTRIBUTION_VERSION: '34'
     FDO_DISTRIBUTION_TAG: $FEDORA_TAG
   needs:
-    - "fedora:32@container-prep"
+    - "fedora:33@container-prep"
   script:
     - dnf install -y rpmdevtools jq
     - meson "$MESON_BUILDDIR"
@@ -1089,10 +1056,10 @@ wayland-web:
     refs:
       - schedules
   variables:
-    MESON_ARGS: '-Ddebug-gui=false -Dlibwacom=false -Dtests=false'
+    MESON_ARGS: '-Ddocumentation=true -Ddebug-gui=false -Dlibwacom=false -Dtests=false'
     MESON_BUILDDIR: 'builddir'
   only:
     refs:
-      - master
+      - main
     variables:
       - $CI_PROJECT_PATH == "libinput/libinput"

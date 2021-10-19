@@ -110,12 +110,10 @@ the library path and that all symlinks point to the new library.
 
 ::
 
-     $> ls -l /usr/lib64/libinput.*
-     -rwxr-xr-x 1 root root    946 Apr 28  2015 /usr/lib64/libinput.la
-     lrwxrwxrwx 1 root root     19 Feb  1 15:12 /usr/lib64/libinput.so -> libinput.so.10.13.0
-     lrwxrwxrwx 1 root root     19 Feb  1 15:12 /usr/lib64/libinput.so.10 -> libinput.so.10.13.0
-     -rwxr-xr-x 1 root root 204992 Feb  1 15:12 /usr/lib64/libinput.so.10.13.0
-
+     $> ldconfig -p | grep libinput | awk '{print $NF}' | xargs ls -l
+     lrwxrwxrwx 1 root root      14 lug 22 13:06 /usr/lib/x86_64-linux-gnu/libinput.so -> libinput.so.10
+     lrwxrwxrwx 1 root root      19 lug 22 13:06 /usr/lib/x86_64-linux-gnu/libinput.so.10 -> libinput.so.10.13.0
+     -rwxr-xr-x 1 root root 1064144 lug 22 13:06 /usr/lib/x86_64-linux-gnu/libinput.so.10.13.0
 
 .. _reverting_install:
 
@@ -190,7 +188,7 @@ libinput has a few build-time dependencies that must be installed prior to
 running meson.
 
 .. hint:: The build dependencies for some distributions can be found in the
-	`GitLab Continuous Integration file <https://gitlab.freedesktop.org/libinput/libinput/blob/master/.gitlab-ci.yml>`_.
+	`GitLab Continuous Integration file <https://gitlab.freedesktop.org/libinput/libinput/blob/main/.gitlab-ci.yml>`_.
 	Search for **FEDORA_RPMS** in the **variables:** definition
 	and check the list for an entry for your distribution.
 
@@ -283,6 +281,11 @@ Software that uses meson should use the ``dependency()`` function: ::
 
     pkgconfig = import('pkgconfig')
     dep_libinput = dependency('libinput')
+
+Software that uses CMake should use: ::
+
+    find_package(Libinput)
+    target_link_libraries(myprogram PRIVATE Libinput::Libinput)
 
 Otherwise, the most rudimentary way to compile and link a program against
 libinput is:

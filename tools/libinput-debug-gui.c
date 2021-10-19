@@ -48,6 +48,26 @@
 
 #include "shared.h"
 
+#ifdef GDK_WINDOWING_WAYLAND
+	#include <wayland-client.h>
+	#include "pointer-constraints-unstable-v1-client-protocol.h"
+	#if HAVE_GTK4
+		#include <gdk/wayland/gdkwayland.h>
+	#else
+		#include <gdk/gdkwayland.h>
+	#endif
+#endif
+
+#ifdef GDK_WINDOWING_X11
+	#include <X11/X.h>
+	#include <X11/Xlib.h>
+	#if HAVE_GTK4
+		#include <gdk/x11/gdkx.h>
+	#else
+		#include <gdk/gdkx.h>
+	#endif
+#endif
+
 #define clip(val_, min_, max_) min((max_), max((min_), (val_)))
 
 enum touch_state {
@@ -65,10 +85,6 @@ struct point {
 	double x, y;
 };
 
-struct device_user_data {
-	struct point scroll_accumulated;
-};
-
 struct evdev_device {
 	struct list node;
 	struct libevdev *evdev;
@@ -81,6 +97,8 @@ struct window {
 	bool grab;
 	struct tools_options options;
 	struct list evdev_devices;
+
+	GMainLoop *event_loop;
 
 	GtkWidget *win;
 	GtkWidget *area;
@@ -97,6 +115,16 @@ struct window {
 
 	/* abs position */
 	struct point abs;
+
+	/* Wayland and X11 pointer locking */
+	struct {
+		bool locked;
+
+#ifdef GDK_WINDOWING_WAYLAND
+		struct zwp_pointer_constraints_v1 *wayland_pointer_constraints;
+		struct zwp_locked_pointer_v1 *wayland_locked_pointer;
+#endif
+	} lock_pointer;
 
 	/* scroll bar positions */
 	struct {
@@ -129,6 +157,11 @@ struct window {
 		double angle;
 		double x, y;
 	} pinch;
+
+	struct {
+		int nfingers;
+		bool active;
+	} hold;
 
 	struct {
 		double x, y;
@@ -173,6 +206,180 @@ struct window {
 
 	struct libinput_device *devices[50];
 };
+
+#ifdef GDK_WINDOWING_WAYLAND
+static void
+wayland_registry_global(void *data,
+			struct wl_registry *registry,
+			uint32_t name,
+			const char *interface,
+			uint32_t version)
+{
+	struct window *w = data;
+
+	if (!g_strcmp0(interface, "zwp_pointer_constraints_v1")) {
+		w->lock_pointer.wayland_pointer_constraints =
+			wl_registry_bind(registry,
+					 name,
+					 &zwp_pointer_constraints_v1_interface,
+					 1);
+        }
+}
+
+static void
+wayland_registry_global_remove(void *data,
+			       struct wl_registry *wl_registry,
+			       uint32_t name)
+{
+
+}
+
+struct wl_registry_listener registry_listener = {
+	wayland_registry_global,
+	wayland_registry_global_remove
+};
+
+static bool
+wayland_lock_pointer(struct window *w)
+{
+	GdkDisplay *gdk_display;
+	GdkSeat *gdk_seat;
+	GdkDevice *gdk_device;
+	struct wl_display *display;
+	struct wl_registry *registry;
+	struct wl_pointer *wayland_pointer;
+	struct wl_surface *surface;
+
+	w->lock_pointer.wayland_pointer_constraints = NULL;
+
+	gdk_display = gdk_display_get_default();
+	display = gdk_wayland_display_get_wl_display(gdk_display);
+
+	gdk_seat = gdk_display_get_default_seat(gdk_display);
+	gdk_device = gdk_seat_get_pointer(gdk_seat);
+	wayland_pointer = gdk_wayland_device_get_wl_pointer(gdk_device);
+
+	registry = wl_display_get_registry(display);
+	wl_registry_add_listener(registry, &registry_listener, w);
+	wl_display_roundtrip(display);
+
+	if (!w->lock_pointer.wayland_pointer_constraints)
+		return false;
+
+#if HAVE_GTK4
+	GtkNative *window = gtk_widget_get_native(w->win);
+	GdkSurface *gdk_surface = gtk_native_get_surface(window);
+	surface = gdk_wayland_surface_get_wl_surface(gdk_surface);
+#else
+	GdkWindow *window = gtk_widget_get_window(w->win);
+	surface = gdk_wayland_window_get_wl_surface(window);
+#endif
+
+	w->lock_pointer.wayland_locked_pointer =
+		zwp_pointer_constraints_v1_lock_pointer(w->lock_pointer.wayland_pointer_constraints,
+							surface,
+							wayland_pointer,
+							NULL,
+							ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+
+	return true;
+}
+
+static void
+wayland_unlock_pointer(struct window *w)
+{
+	w->lock_pointer.wayland_pointer_constraints = NULL;
+	zwp_locked_pointer_v1_destroy(w->lock_pointer.wayland_locked_pointer);
+}
+
+static inline bool
+backend_is_wayland(void)
+{
+	return GDK_IS_WAYLAND_DISPLAY(gdk_display_get_default());
+}
+#endif /* GDK_WINDOWING_WAYLAND */
+
+#ifdef GDK_WINDOWING_X11
+static bool
+x_lock_pointer(struct window *w)
+{
+	Display *x_display;
+	Window x_win;
+	int result;
+
+	x_display = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
+
+#if HAVE_GTK4
+	GtkNative *window = gtk_widget_get_native(w->win);
+	GdkSurface *surface = gtk_native_get_surface(window);
+	x_win = GDK_SURFACE_XID(surface);
+#else
+	GdkWindow *window = gtk_widget_get_window(w->win);
+	x_win = GDK_WINDOW_XID(window);
+#endif
+
+	result = XGrabPointer(x_display, x_win,
+			      False, NoEventMask,
+			      GrabModeAsync, GrabModeAsync,
+			      x_win,
+			      None,
+			      CurrentTime);
+	return (result == GrabSuccess);
+}
+
+static void
+x_unlock_pointer(struct window *w)
+{
+	Display *x_display;
+
+	x_display = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
+
+	XUngrabPointer(x_display, CurrentTime);
+}
+
+static inline bool
+backend_is_x11(void)
+{
+	return GDK_IS_X11_DISPLAY(gdk_display_get_default());
+}
+#endif /* GDK_WINDOWING_X11 */
+
+static bool
+window_lock_pointer(struct window *w)
+{
+	w->lock_pointer.locked = false;
+
+#ifdef GDK_WINDOWING_WAYLAND
+	if (backend_is_wayland())
+		w->lock_pointer.locked = wayland_lock_pointer(w);
+#endif
+
+#ifdef GDK_WINDOWING_X11
+	if (backend_is_x11())
+		w->lock_pointer.locked = x_lock_pointer(w);
+#endif
+
+	return w->lock_pointer.locked;
+}
+
+static void
+window_unlock_pointer(struct window *w)
+{
+	if (!w->lock_pointer.locked)
+		return;
+
+	w->lock_pointer.locked = false;
+
+#ifdef GDK_WINDOWING_WAYLAND
+	if (backend_is_wayland())
+		wayland_unlock_pointer(w);
+#endif
+
+#ifdef GDK_WINDOWING_X11
+	if (backend_is_x11())
+		x_unlock_pointer(w);
+#endif
+}
 
 LIBINPUT_ATTRIBUTE_PRINTF(1, 2)
 static inline void
@@ -311,19 +518,18 @@ draw_outline:
 static inline void
 draw_gestures(struct window *w, cairo_t *cr)
 {
-	int i;
 	int offset;
 
 	/* swipe */
 	cairo_save(cr);
 	cairo_translate(cr, w->swipe.x, w->swipe.y);
-	for (i = 0; i < w->swipe.nfingers; i++) {
+	for (int i = 0; i < w->swipe.nfingers; i++) {
 		cairo_set_source_rgb(cr, .8, .8, .4);
 		cairo_arc(cr, (i - 2) * 40, 0, 20, 0, 2 * M_PI);
 		cairo_fill(cr);
 	}
 
-	for (i = 0; i < 4; i++) { /* 4 fg max */
+	for (int i = 0; i < 4; i++) { /* 4 fg max */
 		cairo_set_source_rgb(cr, 0, 0, 0);
 		cairo_arc(cr, (i - 2) * 40, 0, 20, 0, 2 * M_PI);
 		cairo_stroke(cr);
@@ -347,6 +553,29 @@ draw_gestures(struct window *w, cairo_t *cr)
 	cairo_stroke(cr);
 	cairo_arc(cr, -offset, offset, 20, 0, 2 * M_PI);
 	cairo_stroke(cr);
+
+	cairo_restore(cr);
+
+	/* hold */
+	cairo_save(cr);
+	cairo_translate(cr, w->width/2, w->height/2 + 100);
+
+	for (int i = 4; i > 0; i--) { /* 4 fg max */
+		double r, g, b, hold_alpha;
+
+		r = .4 + .2 * (i % 2);
+		g = .2;
+		b = .2;
+		hold_alpha = (w->hold.active && i <= w->hold.nfingers) ? 1 : .5;
+
+		cairo_set_source_rgba(cr, r, g, b, hold_alpha);
+		cairo_arc(cr, 0, 0, 20 * i, 0, 2 * M_PI);
+		cairo_fill(cr);
+
+		cairo_set_source_rgba(cr, 0, 0, 0, hold_alpha);
+		cairo_arc(cr, 0, 0, 20 * i, 0, 2 * M_PI);
+		cairo_stroke(cr);
+	}
 
 	cairo_restore(cr);
 }
@@ -763,15 +992,27 @@ draw(GtkWidget *widget, cairo_t *cr, gpointer data)
 	return TRUE;
 }
 
+#if HAVE_GTK4
 static void
-map_event_cb(GtkWidget *widget, GdkEvent *event, gpointer data)
+draw_gtk4(GtkDrawingArea *widget,
+	  cairo_t *cr,
+	  int width,
+	  int height,
+	  gpointer data)
 {
-	struct window *w = data;
-	GdkDisplay *display;
-	GdkSeat *seat;
-	GdkWindow *window;
+	draw(GTK_WIDGET(widget), cr, data);
+}
+#endif
 
+static void
+window_place_ui_elements(GtkWidget *widget, struct window *w)
+{
+#if HAVE_GTK4
+	w->width = gtk_widget_get_width(w->area);
+	w->height = gtk_widget_get_height(w->area);
+#else
 	gtk_window_get_size(GTK_WINDOW(widget), &w->width, &w->height);
+#endif
 
 	w->pointer.x = w->width/2;
 	w->pointer.y = w->height/2;
@@ -795,6 +1036,34 @@ map_event_cb(GtkWidget *widget, GdkEvent *event, gpointer data)
 	w->pinch.scale = 1.0;
 	w->pinch.x = w->width/2;
 	w->pinch.y = w->height/2;
+}
+
+#if HAVE_GTK4
+static void
+map_event_cb(GtkDrawingArea *widget, int width, int height, gpointer data)
+{
+	struct window *w = data;
+
+	window_place_ui_elements(GTK_WIDGET(widget), w);
+
+	gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(w->area),
+				       draw_gtk4,
+				       w,
+				       NULL);
+
+	gtk_widget_set_cursor_from_name(w->win, "none");
+
+	window_lock_pointer(w);
+}
+#else
+static void
+map_event_cb(GtkWidget *widget, GdkEvent *event, gpointer data)
+{
+	struct window *w = data;
+	GdkDisplay *display;
+	GdkWindow *window;
+
+	window_place_ui_elements(widget, w);
 
 	g_signal_connect(G_OBJECT(w->area), "draw", G_CALLBACK(draw), w);
 
@@ -805,39 +1074,79 @@ map_event_cb(GtkWidget *widget, GdkEvent *event, gpointer data)
 			      gdk_cursor_new_for_display(display,
 							 GDK_BLANK_CURSOR));
 
-	seat = gdk_display_get_default_seat(display);
-	gdk_seat_grab(seat,
-		      window,
-		      GDK_SEAT_CAPABILITY_ALL_POINTING,
-		      FALSE, /* owner-events */
-		      NULL, /* cursor */
-		      NULL, /* triggering event */
-		      NULL, /* prepare_func */
-		      NULL /* prepare_func_data */
-		     );
+	window_lock_pointer(w);
 }
+#endif
+
+static void
+window_quit(struct window *w)
+{
+	g_main_loop_quit(w->event_loop);
+}
+
+#if HAVE_GTK4
+static gboolean
+window_delete_event_cb(GtkWindow *window, gpointer data)
+{
+	struct window *w = data;
+
+	window_quit(w);
+
+	return TRUE;
+}
+#else
+static void
+window_delete_event_cb(GtkWidget *widget, GdkEvent *event, gpointer data)
+{
+	struct window *w = data;
+
+	window_quit(w);
+}
+#endif
 
 static void
 window_init(struct window *w)
 {
 	list_init(&w->evdev_devices);
 
+#if HAVE_GTK4
+	w->win = gtk_window_new();
+#else
 	w->win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	if (getenv("LIBINPUT_RUNNING_TEST_SUITE"))
+#endif
+
+	if (getenv("LIBINPUT_RUNNING_TEST_SUITE")) {
+#if HAVE_GTK4
+		gtk_window_minimize(GTK_WINDOW(w->win));
+#else
 		gtk_window_iconify(GTK_WINDOW(w->win));
-	gtk_widget_set_events(w->win, 0);
+#endif
+	}
+
 	gtk_window_set_title(GTK_WINDOW(w->win), "libinput debugging tool");
 	gtk_window_set_default_size(GTK_WINDOW(w->win), 1024, 768);
 	gtk_window_maximize(GTK_WINDOW(w->win));
 	gtk_window_set_resizable(GTK_WINDOW(w->win), TRUE);
 	gtk_widget_realize(w->win);
-	g_signal_connect(G_OBJECT(w->win), "map-event", G_CALLBACK(map_event_cb), w);
-	g_signal_connect(G_OBJECT(w->win), "delete-event", G_CALLBACK(gtk_main_quit), NULL);
 
 	w->area = gtk_drawing_area_new();
+
+#if HAVE_GTK4
+	g_signal_connect(G_OBJECT(w->area), "resize", G_CALLBACK(map_event_cb), w);
+	g_signal_connect(G_OBJECT(w->win), "close-request", G_CALLBACK(window_delete_event_cb), w);
+
+	gtk_window_set_child(GTK_WINDOW(w->win), w->area);
+	gtk_widget_show(w->win);
+#else
+	g_signal_connect(G_OBJECT(w->win), "map-event", G_CALLBACK(map_event_cb), w);
+	g_signal_connect(G_OBJECT(w->win), "delete-event", G_CALLBACK(window_delete_event_cb), w);
+
+	gtk_widget_set_events(w->win, 0);
 	gtk_widget_set_events(w->area, 0);
+
 	gtk_container_add(GTK_CONTAINER(w->win), w->area);
 	gtk_widget_show_all(w->win);
+#endif
 
 	w->pad.ring.position = -1;
 	w->pad.strip.position = -1;
@@ -974,7 +1283,6 @@ register_evdev_device(struct window *w, struct libinput_device *dev)
 	const char *device_node;
 	int fd;
 	struct evdev_device *d;
-	struct device_user_data *data;
 
 	ud = libinput_device_get_udev_device(dev);
 	device_node = udev_device_get_devnode(ud);
@@ -997,9 +1305,6 @@ register_evdev_device(struct window *w, struct libinput_device *dev)
 	d->evdev = evdev;
 	d->libinput_device =libinput_device_ref(dev);
 
-	data = zalloc(sizeof *data);
-	libinput_device_set_user_data(dev, data);
-
 	c = g_io_channel_unix_new(fd);
 	g_io_channel_set_encoding(c, NULL, NULL);
 	d->source_id = g_io_add_watch(c, G_IO_IN,
@@ -1016,7 +1321,7 @@ unregister_evdev_device(struct window *w, struct libinput_device *dev)
 {
 	struct evdev_device *d;
 
-	list_for_each(d, &w->evdev_devices, node) {
+	list_for_each_safe(d, &w->evdev_devices, node) {
 		if (d->libinput_device != dev)
 			continue;
 
@@ -1036,10 +1341,10 @@ static void
 handle_event_device_notify(struct libinput_event *ev)
 {
 	struct libinput_device *dev = libinput_event_get_device(ev);
+	struct libinput_device **device;
 	struct libinput *li;
 	struct window *w;
 	const char *type;
-	size_t i;
 
 	li = libinput_event_get_context(ev);
 	w = libinput_get_user_data(li);
@@ -1060,17 +1365,17 @@ handle_event_device_notify(struct libinput_event *ev)
 	    type);
 
 	if (libinput_event_get_type(ev) == LIBINPUT_EVENT_DEVICE_ADDED) {
-		for (i = 0; i < ARRAY_LENGTH(w->devices); i++) {
-			if (w->devices[i] == NULL) {
-				w->devices[i] = libinput_device_ref(dev);
+		ARRAY_FOR_EACH(w->devices, device) {
+			if (*device == NULL) {
+				*device = libinput_device_ref(dev);
 				break;
 			}
 		}
 	} else  {
-		for (i = 0; i < ARRAY_LENGTH(w->devices); i++) {
-			if (w->devices[i] == dev) {
-				libinput_device_unref(w->devices[i]);
-				w->devices[i] = NULL;
+		ARRAY_FOR_EACH(w->devices, device) {
+			if (*device == dev) {
+				libinput_device_unref(*device);
+				*device = NULL;
 				break;
 			}
 		}
@@ -1150,44 +1455,33 @@ static void
 handle_event_axis(struct libinput_event *ev, struct window *w)
 {
 	struct libinput_event_pointer *p = libinput_event_get_pointer_event(ev);
-	struct libinput_device *dev = libinput_event_get_device(ev);
-	struct device_user_data *data = libinput_device_get_user_data(dev);
 	double value;
-	int discrete;
+	enum libinput_pointer_axis axis;
+	enum libinput_event_type type;
 
-	assert(data);
+	type = libinput_event_get_type(ev);
 
-	if (libinput_event_pointer_has_axis(p,
-			LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL)) {
-		value = libinput_event_pointer_get_axis_value(p,
-				LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
+	axis = LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL;
+	if (libinput_event_pointer_has_axis(p, axis)) {
+		value = libinput_event_pointer_get_scroll_value(p, axis);
 		w->scroll.vy += value;
 		w->scroll.vy = clip(w->scroll.vy, 0, w->height);
-		data->scroll_accumulated.y += value;
 
-		discrete = libinput_event_pointer_get_axis_value_discrete(p,
-				LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
-		if (discrete) {
-			w->scroll.vy_discrete += data->scroll_accumulated.y;
+		if (type == LIBINPUT_EVENT_POINTER_SCROLL_WHEEL) {
+			w->scroll.vy_discrete += value;
 			w->scroll.vy_discrete = clip(w->scroll.vy_discrete, 0, w->height);
-			data->scroll_accumulated.y = 0;
 		}
 	}
 
-	if (libinput_event_pointer_has_axis(p,
-			LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL)) {
-		value = libinput_event_pointer_get_axis_value(p,
-				LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL);
+	axis = LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL;
+	if (libinput_event_pointer_has_axis(p, axis)) {
+		value = libinput_event_pointer_get_scroll_value(p, axis);
 		w->scroll.hx += value;
 		w->scroll.hx = clip(w->scroll.hx, 0, w->width);
-		data->scroll_accumulated.x += value;
 
-		discrete = libinput_event_pointer_get_axis_value_discrete(p,
-				LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL);
-		if (discrete) {
-			w->scroll.hx_discrete += data->scroll_accumulated.x;
+		if (type == LIBINPUT_EVENT_POINTER_SCROLL_WHEEL) {
+			w->scroll.hx_discrete += value;
 			w->scroll.hx_discrete = clip(w->scroll.hx_discrete, 0, w->width);
-			data->scroll_accumulated.x = 0;
 		}
 	}
 }
@@ -1312,6 +1606,28 @@ handle_event_pinch(struct libinput_event *ev, struct window *w)
 }
 
 static void
+handle_event_hold(struct libinput_event *ev, struct window *w)
+{
+	struct libinput_event_gesture *g = libinput_event_get_gesture_event(ev);
+	int nfingers;
+
+	nfingers = libinput_event_gesture_get_finger_count(g);
+
+	switch (libinput_event_get_type(ev)) {
+	case LIBINPUT_EVENT_GESTURE_HOLD_BEGIN:
+		w->hold.nfingers = nfingers;
+		w->hold.active = true;
+		break;
+	case LIBINPUT_EVENT_GESTURE_HOLD_END:
+		w->hold.nfingers = nfingers;
+		w->hold.active = false;
+		break;
+	default:
+		abort();
+	}
+}
+
+static void
 handle_event_tablet(struct libinput_event *ev, struct window *w)
 {
 	struct libinput_event_tablet_tool *t = libinput_event_get_tablet_tool_event(ev);
@@ -1358,7 +1674,7 @@ handle_event_tablet(struct libinput_event *ev, struct window *w)
 			w->tool.y_up = y;
 			w->tool.is_down = false;
 		}
-		/* fallthrough */
+		_fallthrough_;
 	case LIBINPUT_EVENT_TABLET_TOOL_AXIS:
 		w->tool.x = x;
 		w->tool.y = y;
@@ -1463,6 +1779,11 @@ handle_event_libinput(GIOChannel *source, GIOCondition condition, gpointer data)
 		case LIBINPUT_EVENT_TOUCH_FRAME:
 			break;
 		case LIBINPUT_EVENT_POINTER_AXIS:
+			/* ignore */
+			break;
+		case LIBINPUT_EVENT_POINTER_SCROLL_WHEEL:
+		case LIBINPUT_EVENT_POINTER_SCROLL_FINGER:
+		case LIBINPUT_EVENT_POINTER_SCROLL_CONTINUOUS:
 			handle_event_axis(ev, w);
 			break;
 		case LIBINPUT_EVENT_POINTER_BUTTON:
@@ -1471,7 +1792,7 @@ handle_event_libinput(GIOChannel *source, GIOCondition condition, gpointer data)
 		case LIBINPUT_EVENT_KEYBOARD_KEY:
 			if (handle_event_keyboard(ev, w)) {
 				libinput_event_destroy(ev);
-				gtk_main_quit();
+				window_quit(w);
 				return FALSE;
 			}
 			break;
@@ -1484,6 +1805,10 @@ handle_event_libinput(GIOChannel *source, GIOCondition condition, gpointer data)
 		case LIBINPUT_EVENT_GESTURE_PINCH_UPDATE:
 		case LIBINPUT_EVENT_GESTURE_PINCH_END:
 			handle_event_pinch(ev, w);
+			break;
+		case LIBINPUT_EVENT_GESTURE_HOLD_BEGIN:
+		case LIBINPUT_EVENT_GESTURE_HOLD_END:
+			handle_event_hold(ev, w);
 			break;
 		case LIBINPUT_EVENT_TABLET_TOOL_AXIS:
 		case LIBINPUT_EVENT_TABLET_TOOL_PROXIMITY:
@@ -1526,7 +1851,10 @@ usage(void) {
 static gboolean
 signal_handler(void *data)
 {
-	gtk_main_quit();
+	struct libinput *li = data;
+	struct window *w = libinput_get_user_data(li);
+
+	window_quit(w);
 
 	return FALSE;
 }
@@ -1540,11 +1868,16 @@ main(int argc, char **argv)
 	enum tools_backend backend = BACKEND_NONE;
 	const char *seat_or_device[2] = {"seat0", NULL};
 	bool verbose = false;
+	bool gtk_init = false;
 
-	if (!gtk_init_check(&argc, &argv))
+#if HAVE_GTK4
+	gtk_init = gtk_init_check();
+#else
+	gtk_init = gtk_init_check(&argc, &argv);
+#endif
+
+	if (!gtk_init)
 		return 77;
-
-	g_unix_signal_add(SIGINT, signal_handler, NULL);
 
 	tools_init_options(&options);
 
@@ -1620,13 +1953,17 @@ main(int argc, char **argv)
 
 	libinput_set_user_data(li, &w);
 
+	g_unix_signal_add(SIGINT, signal_handler, li);
+
 	window_init(&w);
 	w.options = options;
 	sockets_init(li);
 	handle_event_libinput(NULL, 0, li);
 
-	gtk_main();
+	w.event_loop = g_main_loop_new(NULL, FALSE);
+	g_main_loop_run(w.event_loop);
 
+	window_unlock_pointer(&w);
 	window_cleanup(&w);
 	libinput_unref(li);
 

@@ -1,28 +1,28 @@
 project('libinput', 'c',
-	version : '1.17.0',
+	version : '1.19.1',
 	license : 'MIT/Expat',
 	default_options : [ 'c_std=gnu99', 'warning_level=2' ],
-	meson_version : '>= 0.47.0')
+	meson_version : '>= 0.49.0')
 
 libinput_version = meson.project_version().split('.')
 
-dir_data        = join_paths(get_option('prefix'), get_option('datadir'), 'libinput')
-dir_etc         = join_paths(get_option('prefix'), get_option('sysconfdir'))
-dir_overrides   = join_paths(get_option('prefix'), get_option('sysconfdir'), 'libinput')
-dir_libexec     = join_paths(get_option('prefix'), get_option('libexecdir'), 'libinput')
-dir_lib         = join_paths(get_option('prefix'), get_option('libdir'))
-dir_man1        = join_paths(get_option('prefix'), get_option('mandir'), 'man1')
-dir_system_udev = join_paths(get_option('prefix'), 'lib', 'udev')
-dir_src_quirks  = join_paths(meson.current_source_dir(), 'quirks')
-dir_src_test    = join_paths(meson.current_source_dir(), 'test')
-dir_src         = join_paths(meson.current_source_dir(), 'src')
+dir_data        = get_option('prefix') / get_option('datadir') / 'libinput'
+dir_etc         = get_option('prefix') / get_option('sysconfdir')
+dir_overrides   = get_option('prefix') / get_option('sysconfdir') / 'libinput'
+dir_libexec     = get_option('prefix') / get_option('libexecdir') / 'libinput'
+dir_lib         = get_option('prefix') / get_option('libdir')
+dir_man1        = get_option('prefix') / get_option('mandir') / 'man1'
+dir_system_udev = get_option('prefix') / 'lib' / 'udev'
+dir_src_quirks  = meson.current_source_dir() / 'quirks'
+dir_src_test    = meson.current_source_dir() / 'test'
+dir_src         = meson.current_source_dir() / 'src'
 
 dir_udev = get_option('udev-dir')
 if dir_udev == ''
 	dir_udev = dir_system_udev
 endif
 dir_udev_callouts = dir_udev
-dir_udev_rules    = join_paths(dir_udev, 'rules.d')
+dir_udev_rules    = dir_udev / 'rules.d'
 
 # Collection of man pages, we'll append to that
 src_man = files()
@@ -59,6 +59,7 @@ cflags = [
 	'-Wredundant-decls',
 	'-Wincompatible-pointer-types',
 	'-Wformat=2',
+	'-Wno-missing-field-initializers',
 	'-Wmissing-declarations',
 
 	'-fvisibility=hidden',
@@ -229,8 +230,8 @@ else
 	if dir_libepoll == ''
 		dir_libepoll = get_option('prefix')
 	endif
-	includes_epoll = include_directories(join_paths(dir_libepoll, 'include/libepoll-shim'))
-	dep_libepoll = cc.find_library('epoll-shim', dirs : join_paths(dir_libepoll, 'lib'))
+	includes_epoll = include_directories(dir_libepoll / 'include' / 'libepoll-shim')
+	dep_libepoll = cc.find_library('epoll-shim', dirs : dir_libepoll / 'lib')
 	code = '''
 	#include <sys/epoll.h>
 	int main(void) { epoll_create1(0); }
@@ -268,7 +269,7 @@ foreach h: util_headers
 			          output : 'test-util-includes-@0@.c'.format(h),
 				  configuration : c)
 	executable('test-build-@0@'.format(h),
-		   testfile, join_paths(dir_src, h),
+		   testfile, dir_src / h,
 		   include_directories : [includes_src, includes_include],
 		   install : false)
 endforeach
@@ -315,7 +316,7 @@ dep_libfilter = declare_dependency(link_with : libfilter)
 
 ############ libquirks.a #############
 libinput_data_path = dir_data
-libinput_data_override_path = join_paths(dir_overrides, 'local-overrides.quirks')
+libinput_data_override_path = dir_overrides / 'local-overrides.quirks'
 config_h.set_quoted('LIBINPUT_QUIRKS_DIR', dir_data)
 config_h.set_quoted('LIBINPUT_QUIRKS_OVERRIDE_FILE', libinput_data_override_path)
 
@@ -345,6 +346,8 @@ install_headers('src/libinput.h')
 src_libinput = src_libfilter + [
 	'src/libinput.c',
 	'src/libinput.h',
+	'src/libinput-private-config.c',
+	'src/libinput-private-config.h',
 	'src/libinput-private.h',
 	'src/evdev.c',
 	'src/evdev.h',
@@ -397,7 +400,7 @@ libinput_version_h = configure_file(
 		configuration : libinput_version_h_config,
 )
 
-mapfile = join_paths(dir_src, 'libinput.sym')
+mapfile = dir_src / 'libinput.sym'
 version_flag = '-Wl,--version-script,@0@'.format(mapfile)
 lib_libinput = shared_library('input',
 		src_libinput,
@@ -547,15 +550,50 @@ executable('libinput-record',
 	   )
 
 if get_option('debug-gui')
-	dep_gtk = dependency('gtk+-3.0', version : '>= 3.20')
+	dep_gtk = dependency('gtk4', version : '>= 4.0', required : false)
+	config_h.set10('HAVE_GTK4', dep_gtk.found())
+	if not dep_gtk.found()
+		dep_gtk = dependency('gtk+-3.0', version : '>= 3.20')
+		config_h.set10('HAVE_GTK3', dep_gtk.found())
+	endif
+
 	dep_cairo = dependency('cairo')
 	dep_glib = dependency('glib-2.0')
+	dep_wayland_client = dependency('wayland-client', required : false)
+	dep_wayland_protocols = dependency('wayland-protocols', required : false)
+	dep_x11 = dependency('x11', required : false)
 
 	debug_gui_sources = [ 'tools/libinput-debug-gui.c' ]
+
+	if dep_wayland_client.found() and dep_wayland_protocols.found()
+		wayland_scanner = find_program('wayland-scanner')
+		wlproto_dir = dep_wayland_protocols.get_pkgconfig_variable('pkgdatadir')
+
+		proto_name = 'pointer-constraints-unstable-v1'
+		input = files(wlproto_dir / 'unstable' / 'pointer-constraints' / '@0@.xml'.format(proto_name))
+
+		wayland_headers = custom_target('@0@ client header'.format(proto_name),
+			input: input,
+			output: '@0@-client-protocol.h'.format(proto_name),
+			command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'],
+		)
+
+		wayland_sources = custom_target('@0@ source'.format(proto_name),
+			input: input,
+			output: '@0@-protocol.c'.format(proto_name),
+			command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
+		)
+
+		debug_gui_sources += [ wayland_headers, wayland_sources ]
+	endif
+
 	deps_debug_gui = [
 			dep_gtk,
 			dep_cairo,
 			dep_glib,
+			dep_wayland_client,
+			dep_wayland_protocols,
+			dep_x11,
 			] + deps_tools
 	executable('libinput-debug-gui',
 		   debug_gui_sources,
@@ -625,7 +663,7 @@ test('tools-builddir-lookup-installed',
 
 test('symbols-leak-test',
      find_program('test/symbols-leak-test'),
-     args : [ join_paths(dir_src, 'libinput.sym'), dir_src],
+     args : [ dir_src / 'libinput.sym', dir_src],
      suite : ['all'])
 
 # build-test only
@@ -670,6 +708,8 @@ if get_option('tests')
 	config_h.set10('HAVE_LIBSYSTEMD', dep_libsystemd.found())
 
 	litest_sources = [
+		'src/libinput-private-config.c',
+		'src/libinput-private-config.h',
 		'test/litest.h',
 		'test/litest-int.h',
 		'test/litest-device-absinfo-override.c',
@@ -783,11 +823,11 @@ if get_option('tests')
 
 	litest_config_h = configuration_data()
 	litest_config_h.set_quoted('LIBINPUT_DEVICE_GROUPS_RULES_FILE',
-			    join_paths(meson.current_build_dir(),
-				       '80-libinput-device-groups-litest.rules'))
+				   meson.current_build_dir() /
+				   '80-libinput-device-groups-litest.rules')
 	litest_config_h.set_quoted('LIBINPUT_FUZZ_OVERRIDE_UDEV_RULES_FILE',
-			    join_paths(meson.current_build_dir(),
-				       '90-libinput-fuzz-override-litest.rules'))
+				   meson.current_build_dir() /
+				   '90-libinput-fuzz-override-litest.rules')
 
 	def_no_main = '-DLITEST_NO_MAIN'
 	def_disable_backtrace = '-DLITEST_DISABLE_BACKTRACE_LOGGING'
@@ -888,7 +928,7 @@ if get_option('tests')
 	valgrind = find_program('valgrind', required : false)
 	if valgrind.found()
 		valgrind_env = environment()
-		valgrind_suppressions_file = join_paths(dir_src_test, 'valgrind.suppressions')
+		valgrind_suppressions_file = dir_src_test / 'valgrind.suppressions'
 		add_test_setup('valgrind',
 				exe_wrapper : [ valgrind,
 						'--leak-check=full',

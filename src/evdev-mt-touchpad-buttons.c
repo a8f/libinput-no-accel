@@ -37,7 +37,7 @@
 /*****************************************
  * BEFORE YOU EDIT THIS FILE, look at the state diagram in
  * doc/touchpad-softbutton-state-machine.svg (generated with
- * https://draw.io).
+ * https://www.diagrams.net).
  * Any changes in this file must be represented in the diagram.
  *
  * The state machine only affects the soft button area code.
@@ -102,15 +102,6 @@ is_inside_bottom_middle_area(const struct tp_dispatch *tp,
 }
 
 static inline bool
-is_inside_bottom_left_area(const struct tp_dispatch *tp,
-			   const struct tp_touch *t)
-{
-	return is_inside_bottom_button_area(tp, t) &&
-	       !is_inside_bottom_middle_area(tp, t) &&
-	       !is_inside_bottom_right_area(tp, t);
-}
-
-static inline bool
 is_inside_top_button_area(const struct tp_dispatch *tp,
 			  const struct tp_touch *t)
 {
@@ -123,14 +114,6 @@ is_inside_top_right_area(const struct tp_dispatch *tp,
 {
 	return is_inside_top_button_area(tp, t) &&
 	       t->point.x > tp->buttons.top_area.rightbutton_left_edge;
-}
-
-static inline bool
-is_inside_top_left_area(const struct tp_dispatch *tp,
-			const struct tp_touch *t)
-{
-	return is_inside_top_button_area(tp, t) &&
-	       t->point.x < tp->buttons.top_area.leftbutton_right_edge;
 }
 
 static inline bool
@@ -1249,19 +1232,19 @@ tp_post_clickpadbutton_buttons(struct tp_dispatch *tp, uint64_t time)
 				break;
 			case BUTTON_EVENT_IN_TOP_L:
 				is_top = 1;
-				/* fallthrough */
+				_fallthrough_;
 			case BUTTON_EVENT_IN_BOTTOM_L:
 				area |= LEFT;
 				break;
 			case BUTTON_EVENT_IN_TOP_M:
 				is_top = 1;
-				/* fallthrough */
+				_fallthrough_;
 			case BUTTON_EVENT_IN_BOTTOM_M:
 				area |= MIDDLE;
 				break;
 			case BUTTON_EVENT_IN_TOP_R:
 				is_top = 1;
-				/* fallthrough */
+				_fallthrough_;
 			case BUTTON_EVENT_IN_BOTTOM_R:
 				area |= RIGHT;
 				break;

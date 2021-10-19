@@ -3,16 +3,17 @@
 #
 
 # We're happy to rebuild all containers when one changes.
-.default_tag: &default_tag '2021-01-04.1'
+.default_tag: &default_tag '2021-07-30.0'
 
 distributions:
   - name: fedora
     tag: *default_tag
     versions:
-      - '32'
       - '33'
+      - '34' # last is picked for qemu
     want_qemu: true
     use_for_custom_build_tests: true
+    use_for_qemu_tests: true
     packages:
       - git-core
       - gcc
@@ -30,7 +31,7 @@ distributions:
       - python3-pytest-xdist
       - libwacom-devel
       - cairo-devel
-      - gtk3-devel
+      - gtk4-devel
       - glib2-devel
       - mtdev-devel
       - diffutils
@@ -104,7 +105,7 @@ distributions:
       - python-sphinx_rtd_theme
       - python-pytest-xdist
       - libwacom
-      - gtk3
+      - gtk4
       - mtdev
       - diffutils
   - name: alpine
@@ -121,7 +122,7 @@ distributions:
       - libevdev-dev
       - libwacom-dev
       - cairo-dev
-      - gtk+3.0-dev
+      - gtk4.0-dev
       - mtdev-dev
       - bash
     build:
@@ -133,14 +134,28 @@ distributions:
         - "MESON_TEST_ARGS: '' # litest-selftest fails on musl"
   - name: freebsd
     tag: *default_tag
+    want_qemu: true
+    skip_container: true
+    versions:
+      - '13.0'
     packages:
+      - git
+      - pkgconf
+      - meson
       - libepoll-shim
       - libudev-devd
       - libevdev
       - libwacom
       - gtk3
       - libmtdev
-    does_not_have_ci_templates: true
+      - bash
+      - wayland
+    build:
+      extra_variables:
+        - "MESON_ARGS: '-Dtests=false -Ddocumentation=false' # doxygen drags down too many deps"
+        # We don't run the tests on FreeBSD, someone would have to fix the
+        # test suite to work on BSD first.
+        - "MESON_TEST_ARGS: '' # test suite doesn't work on BSD yet"
 
 test_suites:
   - name: touchpad

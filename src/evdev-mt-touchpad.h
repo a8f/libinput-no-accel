@@ -157,6 +157,9 @@ enum tp_edge_scroll_touch_state {
 enum tp_gesture_state {
 	GESTURE_STATE_NONE,
 	GESTURE_STATE_UNKNOWN,
+	GESTURE_STATE_HOLD,
+	GESTURE_STATE_HOLD_AND_MOTION,
+	GESTURE_STATE_POINTER_MOTION,
 	GESTURE_STATE_SCROLL,
 	GESTURE_STATE_PINCH,
 	GESTURE_STATE_SWIPE,
@@ -345,6 +348,7 @@ struct tp_dispatch {
 	} accel;
 
 	struct {
+		struct libinput_device_config_gesture config;
 		bool enabled;
 		bool started;
 		unsigned int finger_count;
@@ -357,6 +361,8 @@ struct tp_dispatch {
 		double prev_scale;
 		double angle;
 		struct device_float_coords center;
+		struct libinput_timer hold_timer;
+		bool hold_enabled;
 	} gesture;
 
 	struct {
@@ -664,6 +670,9 @@ tp_tap_resume(struct tp_dispatch *tp, uint64_t time);
 bool
 tp_tap_dragging(const struct tp_dispatch *tp);
 
+bool
+tp_tap_dragging_or_double_tapping(const struct tp_dispatch *tp);
+
 void
 tp_edge_scroll_init(struct tp_dispatch *tp, struct evdev_device *device);
 
@@ -699,13 +708,20 @@ void
 tp_gesture_cancel(struct tp_dispatch *tp, uint64_t time);
 
 void
+tp_gesture_cancel_motion_gestures(struct tp_dispatch *tp, uint64_t time);
+
+void
 tp_gesture_handle_state(struct tp_dispatch *tp, uint64_t time);
 
 void
-tp_gesture_post_events(struct tp_dispatch *tp, uint64_t time);
+tp_gesture_post_events(struct tp_dispatch *tp, uint64_t time,
+		       bool ignore_motion);
 
 void
 tp_gesture_stop_twofinger_scroll(struct tp_dispatch *tp, uint64_t time);
+
+void
+tp_gesture_tap_timeout(struct tp_dispatch *tp, uint64_t time);
 
 bool
 tp_palm_tap_is_palm(const struct tp_dispatch *tp, const struct tp_touch *t);
@@ -742,5 +758,8 @@ tp_thumb_update_multifinger(struct tp_dispatch *tp);
 
 void
 tp_init_thumb(struct tp_dispatch *tp);
+
+struct tp_touch*
+tp_thumb_get_touch(struct tp_dispatch *tp);
 
 #endif

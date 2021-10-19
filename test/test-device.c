@@ -1337,7 +1337,11 @@ START_TEST(device_quirks_no_abs_mt_y)
 	struct libinput *li = dev->libinput;
 	struct libinput_event *event;
 	struct libinput_event_pointer *pev;
-	int code;
+	bool hi_res_event_found, low_res_event_found;
+	int code, i;
+
+	hi_res_event_found = false;
+	low_res_event_found = false;
 
 	litest_drain_events(li);
 
@@ -1345,11 +1349,27 @@ START_TEST(device_quirks_no_abs_mt_y)
 	litest_event(dev, EV_SYN, SYN_REPORT, 0);
 	libinput_dispatch(li);
 
-	event = libinput_get_event(li);
-	pev = litest_is_axis_event(event,
-				   LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL,
-				   LIBINPUT_POINTER_AXIS_SOURCE_WHEEL);
-	libinput_event_destroy(libinput_event_pointer_get_base_event(pev));
+	/* both high and low scroll end events must be sent */
+	for (i = 0; i < 2; i++) {
+		event = libinput_get_event(li);
+		pev = litest_is_axis_event(event,
+					   LIBINPUT_EVENT_POINTER_SCROLL_WHEEL,
+					   LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL,
+					   LIBINPUT_POINTER_AXIS_SOURCE_WHEEL);
+
+		if (litest_is_high_res_axis_event(event)) {
+			litest_assert(!hi_res_event_found);
+			hi_res_event_found = true;
+		} else {
+			litest_assert(!low_res_event_found);
+			low_res_event_found = true;
+		}
+
+		libinput_event_destroy(libinput_event_pointer_get_base_event(pev));
+	}
+
+	litest_assert(low_res_event_found);
+	litest_assert(hi_res_event_found);
 
 	for (code = ABS_MISC + 1; code < ABS_MAX; code++) {
 		litest_event(dev, EV_ABS, code, 1);
@@ -1421,13 +1441,14 @@ END_TEST
 
 char *debug_messages[64] = { NULL };
 
+LIBINPUT_ATTRIBUTE_PRINTF(3, 0)
 static void
 debug_log_handler(struct libinput *libinput,
 		  enum libinput_log_priority priority,
 		  const char *format,
 		  va_list args)
 {
-	char *message;
+	char *message, **dmsg;
 	int n;
 
 	if (priority != LIBINPUT_LOG_PRIORITY_DEBUG)
@@ -1436,9 +1457,9 @@ debug_log_handler(struct libinput *libinput,
 	n = xvasprintf(&message, format, args);
 	litest_assert_int_gt(n, 0);
 
-	for (size_t idx = 0; idx < ARRAY_LENGTH(debug_messages); idx++) {
-		if (debug_messages[idx] == NULL) {
-			debug_messages[idx] = message;
+	ARRAY_FOR_EACH(debug_messages, dmsg) {
+		if (*dmsg == NULL) {
+			*dmsg = message;
 			return;
 		}
 	}

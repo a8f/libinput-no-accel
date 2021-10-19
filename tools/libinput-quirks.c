@@ -35,6 +35,7 @@
 
 static bool verbose = false;
 
+LIBINPUT_ATTRIBUTE_PRINTF(3, 0)
 static void
 log_handler(struct libinput *this_is_null,
 	    enum libinput_log_priority priority,
@@ -67,7 +68,10 @@ log_handler(struct libinput *this_is_null,
 	}
 
 	snprintf(buf, sizeof(buf), "%s: %s", prefix, format);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
 	vfprintf(out, buf, args);
+#pragma GCC diagnostic pop
 }
 
 static void

@@ -1866,18 +1866,23 @@ tp_post_events(struct tp_dispatch *tp, uint64_t time)
 	ignore_motion |= tp_tap_handle_state(tp, time);
 	ignore_motion |= tp_post_button_events(tp, time);
 
-	if (ignore_motion ||
-	    tp->palm.trackpoint_active ||
-	    tp->dwt.keyboard_active) {
+	if (tp->palm.trackpoint_active || tp->dwt.keyboard_active) {
 		tp_edge_scroll_stop_events(tp, time);
 		tp_gesture_cancel(tp, time);
+		return;
+	}
+
+	if (ignore_motion) {
+		tp_edge_scroll_stop_events(tp, time);
+		tp_gesture_cancel_motion_gestures(tp, time);
+		tp_gesture_post_events(tp, time, true);
 		return;
 	}
 
 	if (tp_edge_scroll_post_events(tp, time) != 0)
 		return;
 
-	tp_gesture_post_events(tp, time);
+	tp_gesture_post_events(tp, time, false);
 }
 
 static void
@@ -1994,8 +1999,14 @@ static void
 tp_interface_remove(struct evdev_dispatch *dispatch)
 {
 	struct tp_dispatch *tp = tp_dispatch(dispatch);
+	struct evdev_paired_keyboard *kbd;
 
 	libinput_timer_cancel(&tp->arbitration.arbitration_timer);
+
+	list_for_each_safe(kbd, &tp->dwt.paired_keyboard_list, link) {
+		evdev_paired_keyboard_destroy(kbd);
+	}
+	tp->dwt.keyboard_active = false;
 
 	tp_remove_tap(tp);
 	tp_remove_buttons(tp);
@@ -2014,6 +2025,7 @@ tp_interface_destroy(struct evdev_dispatch *dispatch)
 	libinput_timer_destroy(&tp->dwt.keyboard_timer);
 	libinput_timer_destroy(&tp->tap.timer);
 	libinput_timer_destroy(&tp->gesture.finger_count_switch_timer);
+	libinput_timer_destroy(&tp->gesture.hold_timer);
 	free(tp->touches);
 	free(tp);
 }
@@ -2394,14 +2406,13 @@ tp_pair_trackpoint(struct evdev_device *touchpad,
 			struct evdev_device *trackpoint)
 {
 	struct tp_dispatch *tp = (struct tp_dispatch*)touchpad->dispatch;
-	unsigned int bus_tp = libevdev_get_id_bustype(touchpad->evdev),
-		     bus_trp = libevdev_get_id_bustype(trackpoint->evdev);
+	unsigned int bus_trp = libevdev_get_id_bustype(trackpoint->evdev);
 	bool tp_is_internal, trp_is_internal;
 
 	if ((trackpoint->tags & EVDEV_TAG_TRACKPOINT) == 0)
 		return;
 
-	tp_is_internal = bus_tp != BUS_USB && bus_tp != BUS_BLUETOOTH;
+	tp_is_internal = !!(touchpad->tags & EVDEV_TAG_INTERNAL_TOUCHPAD);
 	trp_is_internal = bus_trp != BUS_USB && bus_trp != BUS_BLUETOOTH;
 
 	if (tp->buttons.trackpoint == NULL &&
@@ -2718,22 +2729,15 @@ evdev_tag_touchpad(struct evdev_device *device,
 	/* The hwdb is the authority on integration, these heuristics are
 	 * the fallback only (they precede the hwdb too).
 	 *
-	 * Simple approach: USB is unknown, with the exception
-	 * of Apple where internal touchpads are connected over USB and it
-	 * doesn't have external USB touchpads anyway.
-	 *
+	 * Simple approach:
 	 * Bluetooth touchpads are considered external, anything else is
-	 * internal.
+	 * internal. Except the ones from some vendors that only make external
+	 * touchpads.
 	 */
 	bustype = libevdev_get_id_bustype(device->evdev);
 	vendor = libevdev_get_id_vendor(device->evdev);
 
 	switch (bustype) {
-	case BUS_USB:
-		if (evdev_device_has_model_quirk(device,
-						 QUIRK_MODEL_APPLE_TOUCHPAD))
-			 evdev_tag_touchpad_internal(device);
-		break;
 	case BUS_BLUETOOTH:
 		evdev_tag_touchpad_external(device);
 		break;
@@ -3658,8 +3662,8 @@ tp_init(struct tp_dispatch *tp,
 	if (!use_touch_size)
 		tp_init_pressure(tp, device);
 
-	/* 5 warnings per 2 hours should be enough */
-	ratelimit_init(&tp->jump.warning, s2us(2 * 60 * 60), 5);
+	/* 5 warnings per 24 hours should be enough */
+	ratelimit_init(&tp->jump.warning, h2us(24), 5);
 
 	/* Set the dpi to that of the x axis, because that's what we normalize
 	   to when needed*/

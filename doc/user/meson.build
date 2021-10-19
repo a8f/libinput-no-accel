@@ -50,6 +50,7 @@ src_404s = [
 	[ 'faqs.rst', 'faq.html'],
 	[ 'features.rst', 'features.html'],
 	[ 'gestures.rst', 'gestures.html'],
+	[ 'incorrectly-enabled-hires.rst', 'incorrectly-enabled-hires.html'],
 	[ 'middle-button-emulation.rst', 'middle_button_emulation.html'],
 	[ 'normalization-of-relative-motion.rst', 'motion_normalization.html'],
 	[ 'palm-detection.rst', 'palm_detection.html'],
@@ -143,6 +144,7 @@ src_rst = files(
 	'device-quirks.rst',
 	'faqs.rst',
 	'gestures.rst',
+	'incorrectly-enabled-hires.rst',
 	'middle-button-emulation.rst',
 	'normalization-of-relative-motion.rst',
 	'palm-detection.rst',
@@ -167,6 +169,7 @@ src_rst = files(
 	'trackpoints.rst',
 	'trackpoint-configuration.rst',
 	'what-is-libinput.rst',
+	'wheel-api.rst',
 	'features.rst',
 	'development.rst',
 	'troubleshooting.rst',
@@ -191,7 +194,7 @@ if yq.found()
 	foreach distro : distributions
 		yq_filter = '.distributions[] | select(.name == "@0@") | .packages | join(" ")'.format(distro)
 		deps = run_command(yq, '-r', yq_filter,
-				   join_paths(meson.source_root(), '.gitlab-ci', 'config.yml')).stdout()
+				   meson.source_root() / '.gitlab-ci' / 'config.yml').stdout()
 		dependencies_config.set('@0@_PACKAGES'.format(distro.to_upper()), deps)
 endforeach
 endif
@@ -205,6 +208,6 @@ custom_target('sphinx',
 	      input : [ sphinx_conf_py, git_version_page ] + src_sphinx + dst_404s,
 	      output : [ sphinx_output_dir ],
 	      command : [ sphinx, '-q', '-b', 'html',
-			  '-d', join_paths(meson.current_build_dir(), 'doctrees'),
+			  '-d', meson.current_build_dir() / 'doctrees',
 			  meson.current_build_dir(), sphinx_output_dir],
 	      build_by_default : true)

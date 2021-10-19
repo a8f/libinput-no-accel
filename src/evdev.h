@@ -583,12 +583,28 @@ evdev_update_key_down_count(struct evdev_device *device,
 			    int pressed);
 
 void
-evdev_notify_axis(struct evdev_device *device,
-		  uint64_t time,
-		  uint32_t axes,
-		  enum libinput_pointer_axis_source source,
-		  const struct normalized_coords *delta_in,
-		  const struct discrete_coords *discrete_in);
+evdev_notify_axis_legacy_wheel(struct evdev_device *device,
+			       uint64_t time,
+			       uint32_t axes,
+			       const struct normalized_coords *delta_in,
+			       const struct discrete_coords *discrete_in);
+void
+evdev_notify_axis_wheel(struct evdev_device *device,
+			uint64_t time,
+			uint32_t axes,
+			const struct normalized_coords *delta_in,
+			const struct wheel_v120 *v120_in);
+void
+evdev_notify_axis_finger(struct evdev_device *device,
+			uint64_t time,
+			uint32_t axes,
+			const struct normalized_coords *delta_in);
+void
+evdev_notify_axis_continous(struct evdev_device *device,
+			    uint64_t time,
+			    uint32_t axes,
+			    const struct normalized_coords *delta_in);
+
 void
 evdev_post_scroll(struct evdev_device *device,
 		  uint64_t time,
@@ -775,7 +791,10 @@ evdev_log_msg(struct evdev_device *device,
 		 format);
 
 	va_start(args, format);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
 	log_msg_va(evdev_libinput_context(device), priority, buf, args);
+#pragma GCC diagnostic pop
 	va_end(args);
 
 }
@@ -810,7 +829,10 @@ evdev_log_msg_ratelimit(struct evdev_device *device,
 		 format);
 
 	va_start(args, format);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-nonliteral"
 	log_msg_va(evdev_libinput_context(device), priority, buf, args);
+#pragma GCC diagnostic pop
 	va_end(args);
 
 	if (state == RATELIMIT_THRESHOLD) {

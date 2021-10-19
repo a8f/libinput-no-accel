@@ -963,11 +963,11 @@ START_TEST(touchpad_clickfinger_click_drag)
 		case 3:
 			if (nslots >= nfingers)
 				litest_touch_move(dev, 2, 60, 50 + i);
-			/* fallthrough */
+			_fallthrough_;
 		case 2:
 			if (nslots >= nfingers)
 				litest_touch_move(dev, 1, 50, 50 + i);
-			/* fallthrough */
+			_fallthrough_;
 		case 1:
 			litest_touch_move(dev, 0, 40, 50 + i);
 			break;
@@ -1107,9 +1107,9 @@ START_TEST(clickpad_finger_pin)
 	/* make sure the movement generates pointer events when
 	   not pinned */
 	litest_touch_down(dev, 0, 50, 50);
-	litest_touch_move_to(dev, 0, 50, 50, 52, 52, 10);
-	litest_touch_move_to(dev, 0, 52, 52, 48, 48, 10);
-	litest_touch_move_to(dev, 0, 48, 48, 50, 50, 10);
+	litest_touch_move_to(dev, 0, 50, 50, 54, 54, 10);
+	litest_touch_move_to(dev, 0, 54, 54, 46, 46, 10);
+	litest_touch_move_to(dev, 0, 46, 46, 50, 50, 10);
 	litest_assert_only_typed_events(li, LIBINPUT_EVENT_POINTER_MOTION);
 
 	litest_button_click(dev, BTN_LEFT, true);
