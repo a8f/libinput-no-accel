@@ -223,10 +223,7 @@ START_TEST(tip_down_up)
 
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
 	litest_axis_set_value(axes, ABS_PRESSURE, 30);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 10, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 10, 10, axes);
 
 	libinput_dispatch(li);
 
@@ -240,10 +237,7 @@ START_TEST(tip_down_up)
 
 	litest_axis_set_value(axes, ABS_DISTANCE, 10);
 	litest_axis_set_value(axes, ABS_PRESSURE, 0);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 10, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 0);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_up(dev, 10, 10, axes);
 
 	libinput_dispatch(li);
 	event = libinput_get_event(li);
@@ -251,6 +245,62 @@ START_TEST(tip_down_up)
 					      LIBINPUT_EVENT_TABLET_TOOL_TIP);
 	ck_assert_int_eq(libinput_event_tablet_tool_get_tip_state(tablet_event),
 			 LIBINPUT_TABLET_TOOL_TIP_UP);
+	libinput_event_destroy(event);
+
+	litest_assert_empty_queue(li);
+
+}
+END_TEST
+
+START_TEST(tip_down_up_eraser)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput *li = dev->libinput;
+	struct libinput_event *event;
+	struct libinput_event_tablet_tool *tablet_event;
+	struct libinput_tablet_tool *tool;
+	struct axis_replacement axes[] = {
+		{ ABS_DISTANCE, 10 },
+		{ ABS_PRESSURE, 0 },
+		{ -1, -1 }
+	};
+
+	if (!libevdev_has_event_code(dev->evdev, EV_KEY, BTN_TOOL_RUBBER))
+		return;
+
+	litest_tablet_set_tool_type(dev, BTN_TOOL_RUBBER);
+
+	litest_tablet_proximity_in(dev, 10, 10, axes);
+	litest_drain_events(li);
+
+	litest_axis_set_value(axes, ABS_DISTANCE, 0);
+	litest_axis_set_value(axes, ABS_PRESSURE, 30);
+	litest_tablet_tip_down(dev, 10, 10, axes);
+
+	libinput_dispatch(li);
+
+	event = libinput_get_event(li);
+	tablet_event = litest_is_tablet_event(event,
+					      LIBINPUT_EVENT_TABLET_TOOL_TIP);
+	ck_assert_int_eq(libinput_event_tablet_tool_get_tip_state(tablet_event),
+			 LIBINPUT_TABLET_TOOL_TIP_DOWN);
+	tool = libinput_event_tablet_tool_get_tool(tablet_event);
+	ck_assert_int_eq(libinput_tablet_tool_get_type(tool), LIBINPUT_TABLET_TOOL_TYPE_ERASER);
+	libinput_event_destroy(event);
+	litest_assert_empty_queue(li);
+
+	litest_axis_set_value(axes, ABS_DISTANCE, 10);
+	litest_axis_set_value(axes, ABS_PRESSURE, 0);
+	litest_tablet_tip_up(dev, 10, 10, axes);
+
+	libinput_dispatch(li);
+	event = libinput_get_event(li);
+	tablet_event = litest_is_tablet_event(event,
+					      LIBINPUT_EVENT_TABLET_TOOL_TIP);
+	ck_assert_int_eq(libinput_event_tablet_tool_get_tip_state(tablet_event),
+			 LIBINPUT_TABLET_TOOL_TIP_UP);
+	tool = libinput_event_tablet_tool_get_tool(tablet_event);
+	ck_assert_int_eq(libinput_tablet_tool_get_type(tool), LIBINPUT_TABLET_TOOL_TYPE_ERASER);
 	libinput_event_destroy(event);
 
 	litest_assert_empty_queue(li);
@@ -274,8 +324,7 @@ START_TEST(tip_down_prox_in)
 
 	litest_push_event_frame(dev);
 	litest_tablet_proximity_in(dev, 10, 10, axes);
-	litest_tablet_motion(dev, 10, 10, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
+	litest_tablet_tip_down(dev, 10, 10, axes);
 	litest_pop_event_frame(dev);
 
 	libinput_dispatch(li);
@@ -311,15 +360,13 @@ START_TEST(tip_up_prox_out)
 	};
 
 	litest_tablet_proximity_in(dev, 10, 10, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_event(dev, EV_SYN, SYN_REPORT, 0);
+	litest_tablet_tip_down(dev, 10, 10, axes);
 	litest_drain_events(li);
 
 	litest_axis_set_value(axes, ABS_DISTANCE, 30);
 	litest_axis_set_value(axes, ABS_PRESSURE, 0);
 	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 10, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 0);
+	litest_tablet_tip_up(dev, 10, 10, axes);
 	litest_tablet_proximity_out(dev);
 	litest_pop_event_frame(dev);
 
@@ -357,19 +404,15 @@ START_TEST(tip_up_btn_change)
 		{ -1, -1 }
 	};
 
-	litest_push_event_frame(dev);
 	litest_tablet_proximity_in(dev, 10, 10, axes);
-	litest_tablet_motion(dev, 10, 10, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 10, 10, axes);
 	litest_drain_events(li);
 
 	litest_axis_set_value(axes, ABS_DISTANCE, 30);
 	litest_axis_set_value(axes, ABS_PRESSURE, 0);
 	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 20, axes);
+	litest_tablet_tip_up(dev, 10, 20, axes);
 	litest_event(dev, EV_KEY, BTN_STYLUS, 1);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 0);
 	litest_pop_event_frame(dev);
 
 	libinput_dispatch(li);
@@ -394,18 +437,14 @@ START_TEST(tip_up_btn_change)
 
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
 	litest_axis_set_value(axes, ABS_PRESSURE, 30);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 10, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 10, 10, axes);
 	litest_drain_events(li);
 
 	/* same thing with a release at tip-up */
 	litest_axis_set_value(axes, ABS_DISTANCE, 30);
 	litest_axis_set_value(axes, ABS_PRESSURE, 0);
 	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 10, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 0);
+	litest_tablet_tip_up(dev, 10, 10, axes);
 	litest_event(dev, EV_KEY, BTN_STYLUS, 0);
 	litest_pop_event_frame(dev);
 
@@ -449,9 +488,8 @@ START_TEST(tip_down_btn_change)
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
 	litest_axis_set_value(axes, ABS_PRESSURE, 30);
 	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 20, axes);
+	litest_tablet_tip_down(dev, 10, 20, axes);
 	litest_event(dev, EV_KEY, BTN_STYLUS, 1);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
 	litest_pop_event_frame(dev);
 
 	libinput_dispatch(li);
@@ -477,18 +515,14 @@ START_TEST(tip_down_btn_change)
 
 	litest_axis_set_value(axes, ABS_DISTANCE, 30);
 	litest_axis_set_value(axes, ABS_PRESSURE, 0);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 20, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 0);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_up(dev, 10, 20, axes);
 	litest_drain_events(li);
 
 	/* same thing with a release at tip-down */
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
 	litest_axis_set_value(axes, ABS_PRESSURE, 30);
 	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 20, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
+	litest_tablet_tip_down(dev, 10, 20, axes);
 	litest_event(dev, EV_KEY, BTN_STYLUS, 0);
 	litest_pop_event_frame(dev);
 
@@ -542,11 +576,7 @@ START_TEST(tip_down_motion)
 	/* move x/y on tip down, make sure x/y changed */
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
 	litest_axis_set_value(axes, ABS_PRESSURE, 20);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 70, 70, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_event(dev, EV_SYN, SYN_REPORT, 0);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 70, 70, axes);
 
 	libinput_dispatch(li);
 	event = libinput_get_event(li);
@@ -583,11 +613,7 @@ START_TEST(tip_up_motion)
 	litest_drain_events(li);
 
 	litest_axis_set_value(axes, ABS_PRESSURE, 20);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 70, 70, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_event(dev, EV_SYN, SYN_REPORT, 0);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 70, 70, axes);
 
 	libinput_dispatch(li);
 	event = libinput_get_event(li);
@@ -599,10 +625,7 @@ START_TEST(tip_up_motion)
 
 	/* move x/y on tip up, make sure x/y changed */
 	litest_axis_set_value(axes, ABS_PRESSURE, 0);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 40, 40, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 0);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_up(dev, 40, 40, axes);
 
 	libinput_dispatch(li);
 	event = libinput_get_event(li);
@@ -656,11 +679,7 @@ START_TEST(tip_up_motion_one_axis)
 	litest_tablet_proximity_in(dev, start_x, start_y, axes);
 	litest_axis_set_value(axes, ABS_PRESSURE, 20);
 	for (int i = 0; i < 5; i++) {
-		litest_push_event_frame(dev);
-		litest_tablet_motion(dev, start_x, start_y, axes);
-		litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-		litest_event(dev, EV_SYN, SYN_REPORT, 0);
-		litest_pop_event_frame(dev);
+		litest_tablet_tip_down(dev, start_x, start_y, axes);
 
 		switch (axis) {
 		case ABS_X:
@@ -685,17 +704,14 @@ START_TEST(tip_up_motion_one_axis)
 
 	/* move x on tip up, make sure x/y changed */
 	litest_axis_set_value(axes, ABS_PRESSURE, 0);
-	litest_push_event_frame(dev);
 	switch (axis) {
 	case ABS_X:
-		litest_tablet_motion(dev, 40, 20, axes);
+		litest_tablet_tip_up(dev, 40, 20, axes);
 		break;
 	case ABS_Y:
-		litest_tablet_motion(dev, 20, 40, axes);
+		litest_tablet_tip_up(dev, 20, 40, axes);
 		break;
 	}
-	litest_event(dev, EV_KEY, BTN_TOUCH, 0);
-	litest_pop_event_frame(dev);
 
 	libinput_dispatch(li);
 	event = libinput_get_event(li);
@@ -753,17 +769,11 @@ START_TEST(tip_state_proximity)
 
 	litest_axis_set_value(axes, ABS_PRESSURE, 30);
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 10, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 10, 10, axes);
 
 	litest_axis_set_value(axes, ABS_PRESSURE, 0);
 	litest_axis_set_value(axes, ABS_DISTANCE, 10);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 10, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 0);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_up(dev, 10, 10, axes);
 
 	litest_drain_events(li);
 
@@ -809,10 +819,7 @@ START_TEST(tip_state_axis)
 
 	litest_axis_set_value(axes, ABS_PRESSURE, 30);
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 40, 40, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 40, 40, axes);
 	litest_drain_events(li);
 
 	litest_tablet_motion(dev, 30, 30, axes);
@@ -827,10 +834,7 @@ START_TEST(tip_state_axis)
 
 	litest_axis_set_value(axes, ABS_PRESSURE, 0);
 	litest_axis_set_value(axes, ABS_DISTANCE, 10);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 40, 40, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 0);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_up(dev, 40, 40, axes);
 	litest_drain_events(li);
 
 	litest_tablet_motion(dev, 40, 80, axes);
@@ -875,10 +879,7 @@ START_TEST(tip_state_button)
 
 	litest_axis_set_value(axes, ABS_PRESSURE, 30);
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 40, 40, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 40, 40, axes);
 	litest_drain_events(li);
 
 	litest_button_click(dev, button, false);
@@ -893,10 +894,7 @@ START_TEST(tip_state_button)
 
 	litest_axis_set_value(axes, ABS_PRESSURE, 0);
 	litest_axis_set_value(axes, ABS_DISTANCE, 10);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 40, 40, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 0);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_up(dev, 40, 40, axes);
 	litest_drain_events(li);
 
 	litest_button_click(dev, button, true);
@@ -940,10 +938,7 @@ START_TEST(tip_up_on_delete)
 
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
 	litest_axis_set_value(axes, ABS_PRESSURE, 30);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 10, 10, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 10, 10, axes);
 
 	litest_drain_events(li);
 	litest_delete_device(dev);
@@ -3834,10 +3829,7 @@ START_TEST(tablet_pressure_offset)
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
 	litest_axis_set_value(axes, ABS_PRESSURE, 25);
 
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 70, 70, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 70, 70, axes);
 	libinput_dispatch(li);
 	litest_drain_events(li);
 
@@ -3928,10 +3920,7 @@ START_TEST(tablet_pressure_offset_decrease)
 
 	/* trigger the pressure threshold */
 	litest_axis_set_value(axes, ABS_PRESSURE, 15);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 70, 70, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 70, 70, axes);
 	libinput_dispatch(li);
 
 	event = libinput_get_event(li);
@@ -3972,10 +3961,7 @@ START_TEST(tablet_pressure_offset_increase)
 
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
 	litest_axis_set_value(axes, ABS_PRESSURE, 31);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 70, 70, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 70, 70, axes);
 	libinput_dispatch(li);
 	litest_drain_events(li);
 
@@ -4162,7 +4148,7 @@ START_TEST(tablet_pressure_offset_none_for_zero_distance)
 	 * offset the pressure here */
 	litest_push_event_frame(dev);
 	litest_tablet_proximity_in(dev, 5, 100, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
+	litest_tablet_tip_down(dev, 5, 100, axes);
 	litest_pop_event_frame(dev);
 	libinput_dispatch(li);
 
@@ -4197,10 +4183,7 @@ START_TEST(tablet_pressure_offset_none_for_small_distance)
 
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
 	litest_axis_set_value(axes, ABS_PRESSURE, 21);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 70, 70, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 70, 70, axes);
 	litest_drain_events(li);
 
 	litest_axis_set_value(axes, ABS_PRESSURE, 20);
@@ -4626,10 +4609,7 @@ START_TEST(relative_no_delta_on_tip)
 	/* tip down */
 	litest_axis_set_value(axes, ABS_DISTANCE, 0);
 	litest_axis_set_value(axes, ABS_PRESSURE, 30);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 30, 20, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 1);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_down(dev, 30, 20, axes);
 
 	libinput_dispatch(li);
 	event = libinput_get_event(li);
@@ -4658,10 +4638,7 @@ START_TEST(relative_no_delta_on_tip)
 	/* tip up */
 	litest_axis_set_value(axes, ABS_DISTANCE, 10);
 	litest_axis_set_value(axes, ABS_PRESSURE, 0);
-	litest_push_event_frame(dev);
-	litest_tablet_motion(dev, 50, 40, axes);
-	litest_event(dev, EV_KEY, BTN_TOUCH, 0);
-	litest_pop_event_frame(dev);
+	litest_tablet_tip_up(dev, 50, 40, axes);
 	libinput_dispatch(li);
 	event = libinput_get_event(li);
 	tev = litest_is_tablet_event(event,
@@ -6139,6 +6116,7 @@ TEST_COLLECTION(tablet)
 	litest_add(tip_up_btn_change, LITEST_TABLET|LITEST_HOVER, LITEST_ANY);
 	litest_add(tip_down_motion, LITEST_TABLET|LITEST_HOVER, LITEST_ANY);
 	litest_add(tip_up_motion, LITEST_TABLET|LITEST_HOVER, LITEST_ANY);
+	litest_add(tip_down_up_eraser, LITEST_TABLET|LITEST_HOVER, LITEST_ANY);
 	litest_add_ranged(tip_up_motion_one_axis, LITEST_TABLET|LITEST_HOVER, LITEST_ANY, &xyaxes);
 	litest_add(tip_state_proximity, LITEST_TABLET|LITEST_HOVER, LITEST_ANY);
 	litest_add(tip_state_axis, LITEST_TABLET|LITEST_HOVER, LITEST_ANY);
