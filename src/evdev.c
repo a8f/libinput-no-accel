@@ -53,18 +53,18 @@
 #define DEFAULT_BUTTON_SCROLL_TIMEOUT ms2us(200)
 
 enum evdev_device_udev_tags {
-        EVDEV_UDEV_TAG_INPUT		= bit(0),
-        EVDEV_UDEV_TAG_KEYBOARD		= bit(1),
-        EVDEV_UDEV_TAG_MOUSE		= bit(2),
-        EVDEV_UDEV_TAG_TOUCHPAD		= bit(3),
-        EVDEV_UDEV_TAG_TOUCHSCREEN	= bit(4),
-        EVDEV_UDEV_TAG_TABLET		= bit(5),
-        EVDEV_UDEV_TAG_JOYSTICK		= bit(6),
-        EVDEV_UDEV_TAG_ACCELEROMETER	= bit(7),
-        EVDEV_UDEV_TAG_TABLET_PAD	= bit(8),
-        EVDEV_UDEV_TAG_POINTINGSTICK	= bit(9),
-        EVDEV_UDEV_TAG_TRACKBALL	= bit(10),
-        EVDEV_UDEV_TAG_SWITCH		= bit(11),
+	EVDEV_UDEV_TAG_INPUT		= bit(0),
+	EVDEV_UDEV_TAG_KEYBOARD		= bit(1),
+	EVDEV_UDEV_TAG_MOUSE		= bit(2),
+	EVDEV_UDEV_TAG_TOUCHPAD		= bit(3),
+	EVDEV_UDEV_TAG_TOUCHSCREEN	= bit(4),
+	EVDEV_UDEV_TAG_TABLET		= bit(5),
+	EVDEV_UDEV_TAG_JOYSTICK		= bit(6),
+	EVDEV_UDEV_TAG_ACCELEROMETER	= bit(7),
+	EVDEV_UDEV_TAG_TABLET_PAD	= bit(8),
+	EVDEV_UDEV_TAG_POINTINGSTICK	= bit(9),
+	EVDEV_UDEV_TAG_TRACKBALL	= bit(10),
+	EVDEV_UDEV_TAG_SWITCH		= bit(11),
 };
 
 struct evdev_udev_tag_match {
@@ -86,6 +86,19 @@ static const struct evdev_udev_tag_match evdev_udev_tag_matches[] = {
 	{"ID_INPUT_POINTINGSTICK",	EVDEV_UDEV_TAG_POINTINGSTICK},
 	{"ID_INPUT_TRACKBALL",		EVDEV_UDEV_TAG_TRACKBALL},
 	{"ID_INPUT_SWITCH",		EVDEV_UDEV_TAG_SWITCH},
+};
+
+static const unsigned int well_known_keyboard_keys[] = {
+	KEY_LEFTCTRL,
+	KEY_CAPSLOCK,
+	KEY_NUMLOCK,
+	KEY_INSERT,
+	KEY_MUTE,
+	KEY_CALC,
+	KEY_FILE,
+	KEY_MAIL,
+	KEY_PLAYPAUSE,
+	KEY_BRIGHTNESSDOWN,
 };
 
 static inline bool
@@ -994,13 +1007,13 @@ evdev_read_switch_reliability_prop(struct evdev_device *device)
 	quirks = evdev_libinput_context(device)->quirks;
 	q = quirks_fetch_for_device(quirks, device->udev_device);
 	if (!q || !quirks_get_string(q, QUIRK_ATTR_LID_SWITCH_RELIABILITY, &prop)) {
-		r = RELIABILITY_UNKNOWN;
+		r = RELIABILITY_RELIABLE;
 	} else if (!parse_switch_reliability_property(prop, &r)) {
 		evdev_log_error(device,
 				"%s: switch reliability set to unknown value '%s'\n",
 				device->devname,
 				prop);
-		r = RELIABILITY_UNKNOWN;
+		r = RELIABILITY_RELIABLE;
 	} else if (r == RELIABILITY_WRITE_OPEN) {
 		evdev_log_info(device, "will write switch open events\n");
 	}
@@ -1010,6 +1023,7 @@ evdev_read_switch_reliability_prop(struct evdev_device *device)
 	return r;
 }
 
+LIBINPUT_UNUSED
 static inline void
 evdev_print_event(struct evdev_device *device,
 		  const struct input_event *e)
@@ -1113,7 +1127,7 @@ evdev_note_time_delay(struct evdev_device *device,
 		return;
 
 	tdelta = us2ms(libinput->dispatch_time - eventtime);
-	if (tdelta > 10) {
+	if (tdelta > 20) {
 		evdev_log_bug_client_ratelimit(device,
 					       &device->delay_warning_limit,
 					       "event processing lagging behind by %dms, your system is too slow\n",
@@ -1850,6 +1864,85 @@ evdev_disable_accelerometer_axes(struct evdev_device *device)
 	libevdev_disable_event_code(evdev, EV_ABS, REL_Z);
 }
 
+static bool
+evdev_device_is_joystick_or_gamepad(struct evdev_device *device)
+{
+	enum evdev_device_udev_tags udev_tags;
+	bool has_joystick_tags;
+	struct libevdev *evdev = device->evdev;
+	unsigned int code;
+
+	/* The EVDEV_UDEV_TAG_JOYSTICK is set when a joystick or gamepad button
+	 * is found. However, it can not be used to identify joysticks or
+	 * gamepads because there are keyboards that also have it. Even worse,
+	 * many joysticks also map KEY_* and thus are tagged as keyboards.
+	 *
+	 * In order to be able to detect joysticks and gamepads and
+	 * differentiate them from keyboards, apply the following rules:
+	 *
+	 *  1. The device is tagged as joystick but not as tablet
+	 *  2. The device doesn't have 4 well-known keyboard keys
+	 *  3. It has at least 2 joystick buttons
+	 *  4. It doesn't have 10 keyboard keys */
+
+	udev_tags = evdev_device_get_udev_tags(device, device->udev_device);
+	has_joystick_tags = (udev_tags & EVDEV_UDEV_TAG_JOYSTICK) &&
+			    !(udev_tags & EVDEV_UDEV_TAG_TABLET) &&
+			    !(udev_tags & EVDEV_UDEV_TAG_TABLET_PAD);
+
+	if (!has_joystick_tags)
+		return false;
+
+
+	unsigned int num_well_known_keys = 0;
+
+	for (size_t i = 0; i < ARRAY_LENGTH(well_known_keyboard_keys); i++) {
+		code = well_known_keyboard_keys[i];
+		if (libevdev_has_event_code(evdev, EV_KEY, code))
+			num_well_known_keys++;
+	}
+
+	if (num_well_known_keys >= 4) /* should not have 4 well-known keys */
+		return false;
+
+	unsigned int num_joystick_btns = 0;
+
+	for (code = BTN_JOYSTICK; code < BTN_DIGI; code++) {
+		if (libevdev_has_event_code(evdev, EV_KEY, code))
+			num_joystick_btns++;
+	}
+
+	for (code = BTN_TRIGGER_HAPPY; code <= BTN_TRIGGER_HAPPY40; code++) {
+		if (libevdev_has_event_code(evdev, EV_KEY, code))
+			num_joystick_btns++;
+	}
+
+	if (num_joystick_btns < 2) /* require at least 2 joystick buttons */
+		return false;
+
+	unsigned int num_keys = 0;
+
+	for (code = KEY_ESC; code <= KEY_MICMUTE; code++) {
+		if (libevdev_has_event_code(evdev, EV_KEY, code) )
+			num_keys++;
+	}
+
+	for (code = KEY_OK; code <= KEY_LIGHTS_TOGGLE; code++) {
+		if (libevdev_has_event_code(evdev, EV_KEY, code) )
+			num_keys++;
+	}
+
+	for (code = KEY_ALS_TOGGLE; code < BTN_TRIGGER_HAPPY; code++) {
+		if (libevdev_has_event_code(evdev, EV_KEY, code) )
+			num_keys++;
+	}
+
+	if (num_keys >= 10) /* should not have 10 keyboard keys */
+		return false;
+
+	return true;
+}
+
 static struct evdev_dispatch *
 evdev_configure_device(struct evdev_device *device)
 {
@@ -1893,9 +1986,9 @@ evdev_configure_device(struct evdev_device *device)
 		evdev_disable_accelerometer_axes(device);
 	}
 
-	if (udev_tags == (EVDEV_UDEV_TAG_INPUT|EVDEV_UDEV_TAG_JOYSTICK)) {
+	if (evdev_device_is_joystick_or_gamepad(device)) {
 		evdev_log_info(device,
-			       "device is a joystick, ignoring\n");
+			       "device is a joystick or a gamepad, ignoring\n");
 		return NULL;
 	}
 
@@ -2291,19 +2384,19 @@ evdev_device_create(struct libinput_seat *seat,
 	struct libinput *libinput = seat->libinput;
 	struct evdev_device *device = NULL;
 	int rc;
-	int fd;
+	int fd = -1;
 	int unhandled_device = 0;
 	const char *devnode = udev_device_get_devnode(udev_device);
-	const char *sysname = udev_device_get_sysname(udev_device);
+	char *sysname = str_sanitize(udev_device_get_sysname(udev_device));
 
 	if (!devnode) {
 		log_info(libinput, "%s: no device node associated\n", sysname);
-		return NULL;
+		goto err;
 	}
 
 	if (udev_device_should_be_ignored(udev_device)) {
 		log_debug(libinput, "%s: device is ignored\n", sysname);
-		return NULL;
+		goto err;
 	}
 
 	/* Use non-blocking mode so that we can loop on read on
@@ -2317,13 +2410,15 @@ evdev_device_create(struct libinput_seat *seat,
 			 sysname,
 			 devnode,
 			 strerror(-fd));
-		return NULL;
+		goto err;
 	}
 
 	if (!evdev_device_have_same_syspath(udev_device, fd))
 		goto err;
 
 	device = zalloc(sizeof *device);
+	device->sysname = sysname;
+	sysname = NULL;
 
 	libinput_device_init(&device->base, seat);
 	libinput_seat_ref(seat);
@@ -2346,6 +2441,9 @@ evdev_device_create(struct libinput_seat *seat,
 	device->dispatch = NULL;
 	device->fd = fd;
 	device->devname = libevdev_get_name(device->evdev);
+	/* the log_prefix_name is used as part of a printf format string and
+	 * must not contain % directives, see evdev_log_msg */
+	device->log_prefix_name = str_sanitize(device->devname);
 	device->scroll.threshold = 5.0; /* Default may be overridden */
 	device->scroll.direction_lock_threshold = 5.0; /* Default may be overridden */
 	device->scroll.direction = 0;
@@ -2386,11 +2484,15 @@ evdev_device_create(struct libinput_seat *seat,
 	return device;
 
 err:
-	close_restricted(libinput, fd);
-	if (device) {
-		unhandled_device = device->seat_caps == 0;
-		evdev_device_destroy(device);
+	if (fd >= 0) {
+		close_restricted(libinput, fd);
+		if (device) {
+			unhandled_device = device->seat_caps == 0;
+			evdev_device_destroy(device);
+		}
 	}
+
+	free(sysname);
 
 	return unhandled_device ? EVDEV_UNHANDLED_DEVICE :  NULL;
 }
@@ -2404,7 +2506,7 @@ evdev_device_get_output(struct evdev_device *device)
 const char *
 evdev_device_get_sysname(struct evdev_device *device)
 {
-	return udev_device_get_sysname(device->udev_device);
+	return device->sysname;
 }
 
 const char *
@@ -3001,6 +3103,8 @@ evdev_device_destroy(struct evdev_device *device)
 	if (device->base.group)
 		libinput_device_group_unref(device->base.group);
 
+	free(device->log_prefix_name);
+	free(device->sysname);
 	free(device->output_name);
 	filter_destroy(device->pointer.filter);
 	libinput_timer_destroy(&device->scroll.timer);

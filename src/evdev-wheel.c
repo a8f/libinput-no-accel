@@ -34,8 +34,6 @@
 #define WHEEL_SCROLL_TIMEOUT ms2us(500)
 
 enum wheel_event {
-	WHEEL_EVENT_PRESS,
-	WHEEL_EVENT_RELEASE,
 	WHEEL_EVENT_SCROLL_ACCUMULATED,
 	WHEEL_EVENT_SCROLL,
 	WHEEL_EVENT_SCROLL_TIMEOUT,
@@ -47,7 +45,6 @@ wheel_state_to_str(enum wheel_state state)
 {
 	switch(state) {
 	CASE_RETURN_STRING(WHEEL_STATE_NONE);
-	CASE_RETURN_STRING(WHEEL_STATE_PRESSED);
 	CASE_RETURN_STRING(WHEEL_STATE_ACCUMULATING_SCROLL);
 	CASE_RETURN_STRING(WHEEL_STATE_SCROLLING);
 	}
@@ -58,8 +55,6 @@ static inline const char*
 wheel_event_to_str(enum wheel_event event)
 {
 	switch(event) {
-	CASE_RETURN_STRING(WHEEL_EVENT_PRESS);
-	CASE_RETURN_STRING(WHEEL_EVENT_RELEASE);
 	CASE_RETURN_STRING(WHEEL_EVENT_SCROLL_ACCUMULATED);
 	CASE_RETURN_STRING(WHEEL_EVENT_SCROLL);
 	CASE_RETURN_STRING(WHEEL_EVENT_SCROLL_TIMEOUT);
@@ -96,36 +91,11 @@ wheel_handle_event_on_state_none(struct fallback_dispatch *dispatch,
 				 uint64_t time)
 {
 	switch (event) {
-	case WHEEL_EVENT_PRESS:
-		dispatch->wheel.state = WHEEL_STATE_PRESSED;
-		break;
 	case WHEEL_EVENT_SCROLL:
 		dispatch->wheel.state = WHEEL_STATE_ACCUMULATING_SCROLL;
 		break;
 	case WHEEL_EVENT_SCROLL_DIR_CHANGED:
 		break;
-	case WHEEL_EVENT_RELEASE:
-	case WHEEL_EVENT_SCROLL_ACCUMULATED:
-	case WHEEL_EVENT_SCROLL_TIMEOUT:
-		log_wheel_bug(dispatch, event);
-		break;
-	}
-}
-
-static void
-wheel_handle_event_on_state_pressed(struct fallback_dispatch *dispatch,
-				    enum wheel_event event,
-				    uint64_t time)
-{
-	switch (event) {
-	case WHEEL_EVENT_RELEASE:
-		dispatch->wheel.state = WHEEL_STATE_NONE;
-		break;
-	case WHEEL_EVENT_SCROLL:
-	case WHEEL_EVENT_SCROLL_DIR_CHANGED:
-		/* Ignore scroll while the wheel is pressed */
-		break;
-	case WHEEL_EVENT_PRESS:
 	case WHEEL_EVENT_SCROLL_ACCUMULATED:
 	case WHEEL_EVENT_SCROLL_TIMEOUT:
 		log_wheel_bug(dispatch, event);
@@ -139,9 +109,6 @@ wheel_handle_event_on_state_accumulating_scroll(struct fallback_dispatch *dispat
 						uint64_t time)
 {
 	switch (event) {
-	case WHEEL_EVENT_PRESS:
-		dispatch->wheel.state = WHEEL_STATE_PRESSED;
-		break;
 	case WHEEL_EVENT_SCROLL_ACCUMULATED:
 		dispatch->wheel.state = WHEEL_STATE_SCROLLING;
 		wheel_set_scroll_timer(dispatch, time);
@@ -152,7 +119,6 @@ wheel_handle_event_on_state_accumulating_scroll(struct fallback_dispatch *dispat
 	case WHEEL_EVENT_SCROLL_DIR_CHANGED:
 		dispatch->wheel.state = WHEEL_STATE_NONE;
 		break;
-	case WHEEL_EVENT_RELEASE:
 	case WHEEL_EVENT_SCROLL_TIMEOUT:
 		log_wheel_bug(dispatch, event);
 		break;
@@ -165,10 +131,6 @@ wheel_handle_event_on_state_scrolling(struct fallback_dispatch *dispatch,
 				      uint64_t time)
 {
 	switch (event) {
-	case WHEEL_EVENT_PRESS:
-		dispatch->wheel.state = WHEEL_STATE_PRESSED;
-		wheel_cancel_scroll_timer(dispatch);
-		break;
 	case WHEEL_EVENT_SCROLL:
 		wheel_cancel_scroll_timer(dispatch);
 		wheel_set_scroll_timer(dispatch, time);
@@ -180,7 +142,6 @@ wheel_handle_event_on_state_scrolling(struct fallback_dispatch *dispatch,
 		wheel_cancel_scroll_timer(dispatch);
 		dispatch->wheel.state = WHEEL_STATE_NONE;
 		break;
-	case WHEEL_EVENT_RELEASE:
 	case WHEEL_EVENT_SCROLL_ACCUMULATED:
 		log_wheel_bug(dispatch, event);
 		break;
@@ -197,9 +158,6 @@ wheel_handle_event(struct fallback_dispatch *dispatch,
 	switch (oldstate) {
 	case WHEEL_STATE_NONE:
 		wheel_handle_event_on_state_none(dispatch, event, time);
-		break;
-	case WHEEL_STATE_PRESSED:
-		wheel_handle_event_on_state_pressed(dispatch, event, time);
 		break;
 	case WHEEL_STATE_ACCUMULATING_SCROLL:
 		wheel_handle_event_on_state_accumulating_scroll(dispatch,
@@ -229,17 +187,22 @@ wheel_flush_scroll(struct fallback_dispatch *dispatch,
 	struct discrete_coords discrete = { 0.0, 0.0 };
 	struct wheel_v120 v120 = { 0.0, 0.0 };
 
+	/* This mouse has a trackstick instead of a mouse wheel and sends
+	 * trackstick data via REL_WHEEL. Normalize it like normal x/y coordinates.
+	 */
 	if (device->model_flags & EVDEV_MODEL_LENOVO_SCROLLPOINT) {
 		struct normalized_coords unaccel = { 0.0, 0.0 };
 
-		dispatch->wheel.hi_res.y *= -1;
-		fallback_normalize_delta(device, &dispatch->wheel.hi_res, &unaccel);
+		dispatch->wheel.lo_res.y *= -1;
+		fallback_normalize_delta(device, &dispatch->wheel.lo_res, &unaccel);
 		evdev_post_scroll(device,
 				  time,
 				  LIBINPUT_POINTER_AXIS_SOURCE_CONTINUOUS,
 				  &unaccel);
 		dispatch->wheel.hi_res.x = 0;
 		dispatch->wheel.hi_res.y = 0;
+		dispatch->wheel.lo_res.x = 0;
+		dispatch->wheel.lo_res.y = 0;
 
 		return;
 	}
@@ -307,17 +270,6 @@ wheel_handle_state_none(struct fallback_dispatch *dispatch,
 			uint64_t time)
 {
 
-}
-
-static void
-wheel_handle_state_pressed(struct fallback_dispatch *dispatch,
-			   struct evdev_device *device,
-			   uint64_t time)
-{
-	dispatch->wheel.hi_res.x = 0;
-	dispatch->wheel.hi_res.y = 0;
-	dispatch->wheel.lo_res.x = 0;
-	dispatch->wheel.lo_res.y = 0;
 }
 
 static void
@@ -404,30 +356,6 @@ fallback_wheel_process_relative(struct fallback_dispatch *dispatch,
 }
 
 void
-fallback_wheel_notify_physical_button(struct fallback_dispatch *dispatch,
-				      struct evdev_device *device,
-				      uint64_t time,
-				      int button,
-				      enum libinput_button_state state)
-{
-	/* Lenovo TrackPoint Keyboard II sends its own scroll events when its
-	 * trackpoint is moved while the middle button is pressed.
-	 * Do not inhibit the scroll events.
-	 * https://gitlab.freedesktop.org/libinput/libinput/-/issues/651
-	 */
-	if (evdev_device_has_model_quirk(device,
-					 QUIRK_MODEL_LENOVO_TRACKPOINT_KEYBOARD_2))
-		return;
-
-	if (button == BTN_MIDDLE) {
-		if (state == LIBINPUT_BUTTON_STATE_PRESSED)
-			wheel_handle_event(dispatch, WHEEL_EVENT_PRESS, time);
-		else
-			wheel_handle_event(dispatch, WHEEL_EVENT_RELEASE, time);
-	}
-}
-
-void
 fallback_wheel_handle_state(struct fallback_dispatch *dispatch,
 			    struct evdev_device *device,
 			    uint64_t time)
@@ -450,9 +378,6 @@ fallback_wheel_handle_state(struct fallback_dispatch *dispatch,
 	switch (dispatch->wheel.state) {
 	case WHEEL_STATE_NONE:
 		wheel_handle_state_none(dispatch, device, time);
-		break;
-	case WHEEL_STATE_PRESSED:
-		wheel_handle_state_pressed(dispatch, device, time);
 		break;
 	case WHEEL_STATE_ACCUMULATING_SCROLL:
 		wheel_handle_state_accumulating_scroll(dispatch, device, time);

@@ -1916,6 +1916,7 @@ tp_handle_state(struct tp_dispatch *tp,
 	tp_apply_rotation(tp->device);
 }
 
+LIBINPUT_UNUSED
 static inline void
 tp_debug_touch_state(struct tp_dispatch *tp,
 		     struct evdev_device *device)
@@ -2200,6 +2201,9 @@ static void
 tp_trackpoint_event(uint64_t time, struct libinput_event *event, void *data)
 {
 	struct tp_dispatch *tp = data;
+
+	if (!tp->palm.dwtp_enabled)
+		return;
 
 	/* Buttons do not count as trackpad activity, as people may use
 	   the trackpoint buttons in combination with the touchpad. */
@@ -2881,7 +2885,6 @@ tp_init_slots(struct tp_dispatch *tp,
 		{ BTN_TOOL_TRIPLETAP, 3 },
 		{ BTN_TOOL_DOUBLETAP, 2 },
 	};
-	struct map *m;
 	unsigned int i, n_btn_tool_touches = 1;
 
 	absinfo = libevdev_get_abs_info(device->evdev, ABS_MT_SLOT);
@@ -3202,6 +3205,60 @@ tp_dwt_config_get_default(struct libinput_device *device)
 		LIBINPUT_CONFIG_DWT_DISABLED;
 }
 
+static int
+tp_dwtp_config_is_available(struct libinput_device *device)
+{
+	return 1;
+}
+
+static enum libinput_config_status
+tp_dwtp_config_set(struct libinput_device *device,
+	   enum libinput_config_dwtp_state enable)
+{
+	struct evdev_device *evdev = evdev_device(device);
+	struct tp_dispatch *tp = (struct tp_dispatch*)evdev->dispatch;
+
+	switch(enable) {
+	case LIBINPUT_CONFIG_DWTP_ENABLED:
+	case LIBINPUT_CONFIG_DWTP_DISABLED:
+		break;
+	default:
+		return LIBINPUT_CONFIG_STATUS_INVALID;
+	}
+
+	tp->palm.dwtp_enabled = (enable == LIBINPUT_CONFIG_DWTP_ENABLED);
+
+	return LIBINPUT_CONFIG_STATUS_SUCCESS;
+}
+
+static enum libinput_config_dwtp_state
+tp_dwtp_config_get(struct libinput_device *device)
+{
+	struct evdev_device *evdev = evdev_device(device);
+	struct tp_dispatch *tp = (struct tp_dispatch*)evdev->dispatch;
+
+	return tp->palm.dwtp_enabled ?
+		LIBINPUT_CONFIG_DWTP_ENABLED :
+		LIBINPUT_CONFIG_DWTP_DISABLED;
+}
+
+static bool
+tp_dwtp_default_enabled(struct tp_dispatch *tp)
+{
+	return true;
+}
+
+static enum libinput_config_dwtp_state
+tp_dwtp_config_get_default(struct libinput_device *device)
+{
+	struct evdev_device *evdev = evdev_device(device);
+	struct tp_dispatch *tp = (struct tp_dispatch*)evdev->dispatch;
+
+	return tp_dwtp_default_enabled(tp) ?
+		LIBINPUT_CONFIG_DWTP_ENABLED :
+		LIBINPUT_CONFIG_DWTP_DISABLED;
+}
+
 static inline bool
 tp_is_tpkb_combo_below(struct evdev_device *device)
 {
@@ -3246,6 +3303,22 @@ tp_init_dwt(struct tp_dispatch *tp,
 	tp->dwt.config.get_default_enabled = tp_dwt_config_get_default;
 	tp->dwt.dwt_enabled = tp_dwt_default_enabled(tp);
 	device->base.config.dwt = &tp->dwt.config;
+}
+
+static void
+tp_init_dwtp(struct tp_dispatch *tp,
+	    struct evdev_device *device)
+{
+	tp->palm.dwtp_enabled = tp_dwtp_default_enabled(tp);
+
+	if (device->tags & EVDEV_TAG_EXTERNAL_TOUCHPAD)
+		return;
+
+	tp->palm.config.is_available = tp_dwtp_config_is_available;
+	tp->palm.config.set_enabled = tp_dwtp_config_set;
+	tp->palm.config.get_enabled = tp_dwtp_config_get;
+	tp->palm.config.get_default_enabled = tp_dwtp_config_get_default;
+	device->base.config.dwtp = &tp->palm.config;
 }
 
 static inline void
@@ -3677,6 +3750,7 @@ tp_init(struct tp_dispatch *tp,
 	tp_init_tap(tp);
 	tp_init_buttons(tp, device);
 	tp_init_dwt(tp, device);
+	tp_init_dwtp(tp, device);
 	tp_init_palmdetect(tp, device);
 	tp_init_sendevents(tp, device);
 	tp_init_scroll(tp, device);

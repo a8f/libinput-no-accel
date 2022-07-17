@@ -36,7 +36,7 @@
 # <distribution>:<version>@activity:
 #  e.g. fedora:31@build-default
 
-.templates_sha: &template_sha 007f3e2fe2235328e77d3cd4ce007ab41cd9ce6c
+.templates_sha: &template_sha 0c312d9c7255f46e741d43bcd1930f09cd12efe7
 
 include:
   {% for distro in distributions|sort(attribute="name") %}
@@ -118,7 +118,7 @@ variables:
     paths:
       - $MESON_BUILDDIR/meson-logs
     reports:
-      junit: $MESON_BUILDDIR/junit-*.xml
+      junit: $MESON_BUILDDIR/*junit*.xml
 
 
 #################################################################
@@ -126,6 +126,20 @@ variables:
 #                     sanity check stage                        #
 #                                                               #
 #################################################################
+
+fail-if-fork-is-not-public:
+  stage: sanity check
+  script:
+    - |
+      if [ $CI_PROJECT_VISIBILITY != "public" ]; then
+           echo "*************************************************************************************"
+           echo "Project visibility must be set to 'public'"
+           echo "Change this in $CI_PROJECT_URL/edit under 'Visibility, project features, permissions'"
+           echo "*************************************************************************************"
+           exit 1
+      fi
+  except:
+    - main@libinput/libinput
 
 # Re-generate the CI script and make sure it's the one currently checked in
 # If this job fails, re-generate the gitlab-ci.yml script, see
@@ -329,7 +343,7 @@ check-commit:
       - $MESON_BUILDDIR/meson-logs
       - console.out
     reports:
-      junit: $MESON_BUILDDIR/junit-*.xml
+      junit: $MESON_BUILDDIR/*junit*.xml
 
 
 # Run in a test suite. Special variables:
@@ -473,7 +487,7 @@ build-no-debuggui-nodeps@{{distro.name}}:{{version}}:
   variables:
     MESON_ARGS: "-Ddebug-gui=false"
   before_script:
-    - dnf remove -y gtk3-devel
+    - dnf remove -y gtk3-devel gtk4-devel
 
 build-no-tests@{{distro.name}}:{{version}}:
   extends:
@@ -665,16 +679,18 @@ check-merge-request:
       junit: results.xml
   allow_failure: true
 
+{% for distro in distributions if distro.name == "fedora" %}
+{% set version = "{}".format(distro.versions|last()) %}
 build rpm:
   extends:
     - .fdo.distribution-image@fedora
     - .policy
   stage: deploy
   variables:
-    FDO_DISTRIBUTION_VERSION: '34'
+    FDO_DISTRIBUTION_VERSION: '36'
     FDO_DISTRIBUTION_TAG: $FEDORA_TAG
   needs:
-    - "fedora:33@container-prep"
+    - "fedora:36@container-prep"
   script:
     - dnf install -y rpmdevtools jq
     - meson "$MESON_BUILDDIR"
@@ -688,6 +704,7 @@ build rpm:
     - cd "$MESON_BUILDDIR"
     - meson dist --no-test
     - rpmbuild -ta meson-dist/libinput*.tar.xz
+{% endfor %}
 
 
 wayland-web:

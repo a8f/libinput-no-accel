@@ -1,5 +1,5 @@
 project('libinput', 'c',
-	version : '1.19.2',
+	version : '1.21.0',
 	license : 'MIT/Expat',
 	default_options : [ 'c_std=gnu99', 'warning_level=2' ],
 	meson_version : '>= 0.49.0')
@@ -16,6 +16,7 @@ dir_system_udev = get_option('prefix') / 'lib' / 'udev'
 dir_src_quirks  = meson.current_source_dir() / 'quirks'
 dir_src_test    = meson.current_source_dir() / 'test'
 dir_src         = meson.current_source_dir() / 'src'
+dir_gitlab_ci	= meson.current_source_dir() / '.gitlab-ci'
 
 dir_udev = get_option('udev-dir')
 if dir_udev == ''
@@ -137,6 +138,8 @@ if not cc.has_header_symbol('sys/ptrace.h', 'PTRACE_ATTACH', prefix : prefix)
 	config_h.set('PTRACE_CONT', 'PT_CONTINUE')
 	config_h.set('PTRACE_DETACH', 'PT_DETACH')
 endif
+
+config_h.set10('HAVE_INSTALLED_TESTS', get_option('install-tests'))
 
 # Dependencies
 pkgconfig = import('pkgconfig')
@@ -269,25 +272,16 @@ foreach h: util_headers
 			          output : 'test-util-includes-@0@.c'.format(h),
 				  configuration : c)
 	executable('test-build-@0@'.format(h),
-		   testfile, dir_src / h,
+		   testfile,
 		   include_directories : [includes_src, includes_include],
 		   install : false)
 endforeach
 
 src_libinput_util = [
-	'src/util-bits.h',
 	'src/util-list.c',
-	'src/util-list.h',
-	'src/util-macros.h',
-	'src/util-matrix.h',
 	'src/util-ratelimit.c',
-	'src/util-ratelimit.h',
-	'src/util-strings.h',
 	'src/util-strings.c',
-	'src/util-time.h',
-	'src/util-prop-parsers.h',
 	'src/util-prop-parsers.c',
-	'src/libinput-util.h',
 ]
 libinput_util = static_library('libinput-util',
 			       src_libinput_util,
@@ -306,8 +300,6 @@ src_libfilter = [
 		'src/filter-touchpad-x230.c',
 		'src/filter-tablet.c',
 		'src/filter-trackpoint.c',
-		'src/filter.h',
-		'src/filter-private.h'
 ]
 libfilter = static_library('filter', src_libfilter,
 			   dependencies : [dep_udev, dep_libwacom],
@@ -328,8 +320,6 @@ install_subdir('quirks',
 
 src_libquirks = [
 	'src/quirks.c',
-	'src/quirks.h',
-	'src/builddir.h',
 ]
 
 deps_libquirks = [dep_udev, dep_libwacom, dep_libinput_util]
@@ -339,42 +329,35 @@ libquirks = static_library('quirks', src_libquirks,
 dep_libquirks = declare_dependency(link_with : libquirks)
 
 # Create /etc/libinput
-install_subdir('libinput', install_dir : dir_etc)
+if meson.version().version_compare('>= 0.60')
+	install_emptydir(dir_etc / 'libinput')
+else
+	install_subdir('libinput', install_dir : dir_etc)
+endif
 
 ############ libinput.so ############
 install_headers('src/libinput.h')
 src_libinput = src_libfilter + [
 	'src/libinput.c',
-	'src/libinput.h',
 	'src/libinput-private-config.c',
-	'src/libinput-private-config.h',
-	'src/libinput-private.h',
 	'src/evdev.c',
-	'src/evdev.h',
 	'src/evdev-debounce.c',
 	'src/evdev-fallback.c',
-	'src/evdev-fallback.h',
 	'src/evdev-totem.c',
 	'src/evdev-middle-button.c',
 	'src/evdev-mt-touchpad.c',
-	'src/evdev-mt-touchpad.h',
 	'src/evdev-mt-touchpad-tap.c',
 	'src/evdev-mt-touchpad-thumb.c',
 	'src/evdev-mt-touchpad-buttons.c',
 	'src/evdev-mt-touchpad-edge-scroll.c',
 	'src/evdev-mt-touchpad-gestures.c',
 	'src/evdev-tablet.c',
-	'src/evdev-tablet.h',
 	'src/evdev-tablet-pad.c',
-	'src/evdev-tablet-pad.h',
 	'src/evdev-tablet-pad-leds.c',
 	'src/evdev-wheel.c',
 	'src/path-seat.c',
 	'src/udev-seat.c',
-	'src/udev-seat.h',
 	'src/timer.c',
-	'src/timer.h',
-	'include/linux/input.h'
 ]
 
 deps_libinput = [
@@ -444,9 +427,7 @@ subdir('completion/zsh')
 ############ tools ############
 libinput_tool_path = dir_libexec
 config_h.set_quoted('LIBINPUT_TOOL_PATH', libinput_tool_path)
-tools_shared_sources = [ 'tools/shared.c',
-			 'tools/shared.h',
-			 'src/builddir.h' ]
+tools_shared_sources = [ 'tools/shared.c' ]
 deps_tools_shared = [ dep_libinput, dep_libevdev ]
 lib_tools_shared = static_library('tools_shared',
 				  tools_shared_sources,
@@ -558,15 +539,21 @@ if get_option('debug-gui')
 		config_h.set10('HAVE_GTK3', dep_gtk.found())
 	endif
 
+	gtk_targets = dep_gtk.get_pkgconfig_variable('targets')
+	have_gtk_wayland = gtk_targets.contains('wayland')
+	have_gtk_x11 = gtk_targets.contains('x11')
+
 	dep_cairo = dependency('cairo')
 	dep_glib = dependency('glib-2.0')
+	dep_x11 = dependency('x11', required : false)
 	dep_wayland_client = dependency('wayland-client', required : false)
 	dep_wayland_protocols = dependency('wayland-protocols', required : false)
-	dep_x11 = dependency('x11', required : false)
+
+	config_h.set10('HAVE_GTK_X11', have_gtk_x11 and dep_x11.found())
 
 	debug_gui_sources = [ 'tools/libinput-debug-gui.c' ]
 
-	if dep_wayland_client.found() and dep_wayland_protocols.found()
+	if have_gtk_wayland and dep_wayland_client.found() and dep_wayland_protocols.found()
 		wayland_scanner = find_program('wayland-scanner')
 		wlproto_dir = dep_wayland_protocols.get_pkgconfig_variable('pkgdatadir')
 
@@ -586,6 +573,7 @@ if get_option('debug-gui')
 		)
 
 		debug_gui_sources += [ wayland_headers, wayland_sources ]
+		config_h.set10('HAVE_GTK_WAYLAND', true)
 	endif
 
 	deps_debug_gui = [
@@ -696,6 +684,15 @@ if add_languages('cpp', required: false)
 		   install : false)
 endif
 
+libinput_test_sources = [ 'tools/libinput-test.c' ]
+executable('libinput-test',
+	   libinput_test_sources,
+	   dependencies : deps_tools,
+	   include_directories : [includes_src, includes_include],
+	   install_dir : libinput_tool_path,
+	   install : true,
+	   )
+
 # This is the test suite runner, we allow disabling that one because of
 # dependencies
 if get_option('tests')
@@ -710,9 +707,6 @@ if get_option('tests')
 
 	litest_sources = [
 		'src/libinput-private-config.c',
-		'src/libinput-private-config.h',
-		'test/litest.h',
-		'test/litest-int.h',
 		'test/litest-device-absinfo-override.c',
 		'test/litest-device-acer-hawaii-keyboard.c',
 		'test/litest-device-acer-hawaii-touchpad.c',
@@ -733,6 +727,7 @@ if get_option('tests')
 		'test/litest-device-dell-canvas-totem-touch.c',
 		'test/litest-device-elantech-touchpad.c',
 		'test/litest-device-elan-tablet.c',
+		'test/litest-device-format-string.c',
 		'test/litest-device-generic-pressurepad.c',
 		'test/litest-device-generic-singletouch.c',
 		'test/litest-device-gpio-keys.c',
@@ -745,6 +740,7 @@ if get_option('tests')
 		'test/litest-device-keyboard-razer-blackwidow.c',
 		'test/litest-device-keyboard-razer-blade-stealth.c',
 		'test/litest-device-keyboard-razer-blade-stealth-videoswitch.c',
+		'test/litest-device-lenovo-scrollpoint.c',
 		'test/litest-device-lid-switch.c',
 		'test/litest-device-lid-switch-surface3.c',
 		'test/litest-device-logitech-media-keyboard-elite.c',
@@ -798,6 +794,7 @@ if get_option('tests')
 		'test/litest-device-wacom-intuos5-pad.c',
 		'test/litest-device-wacom-intuos5-pen.c',
 		'test/litest-device-wacom-isdv4-4200-pen.c',
+		'test/litest-device-wacom-isdv4-524c-pen.c',
 		'test/litest-device-wacom-isdv4-e6-pen.c',
 		'test/litest-device-wacom-isdv4-e6-finger.c',
 		'test/litest-device-wacom-mobilestudio-pro-pad.c',
@@ -807,7 +804,6 @@ if get_option('tests')
 		'test/litest-device-vmware-virtual-usb-mouse.c',
 		'test/litest-device-yubikey.c',
 		'test/litest.c',
-		'include/valgrind/valgrind.h'
 	]
 
 	dep_dl = cc.find_library('dl')
@@ -834,12 +830,12 @@ if get_option('tests')
 	def_disable_backtrace = '-DLITEST_DISABLE_BACKTRACE_LOGGING'
 	defs_litest_selftest = [
 		def_no_main,
-		def_disable_backtrace
+		def_disable_backtrace,
+		'-Wno-unused',
 	]
 	test_litest_selftest_sources = [
 		'test/litest-selftest.c',
 		'test/litest.c',
-		'test/litest.h'
 	]
 	test_litest_selftest = executable('test-litest-selftest',
 					  test_litest_selftest_sources,
@@ -862,14 +858,14 @@ if get_option('tests')
 	     suite : ['all'])
 
 	test_utils_sources = [
-		'src/libinput-util.h',
 		'test/test-utils.c',
 	]
-	test_utils = executable('test-utils',
+	test_utils = executable('libinput-test-utils',
 				test_utils_sources,
 				include_directories : [includes_src, includes_include],
 				dependencies : deps_litest,
-				install: false)
+				install_dir : libinput_tool_path,
+				install : get_option('install-tests'))
 	test('test-utils',
 	     test_utils,
 	     suite : ['all'])
@@ -896,9 +892,7 @@ if get_option('tests')
 		'test/test-switch.c',
 		'test/test-quirks.c',
 	]
-	libinput_test_runner_sources = litest_sources + tests_sources + [
-		'src/libinput-util.h',
-	]
+	libinput_test_runner_sources = litest_sources + tests_sources
 	libinput_test_runner = executable('libinput-test-suite',
 					  libinput_test_runner_sources,
 					  include_directories : [includes_src, includes_include],
@@ -950,6 +944,11 @@ endif
 man_config = configuration_data()
 man_config.set('LIBINPUT_VERSION', meson.project_version())
 man_config.set('LIBINPUT_DATA_DIR', dir_data)
+if get_option('install-tests')
+	man_config.set('HAVE_INSTALLED_TESTS', '.\"')
+else
+	man_config.set('HAVE_INSTALLED_TESTS', '')
+endif
 src_man += files(
 	'tools/libinput.man',
 	'tools/libinput-analyze.man',
@@ -968,6 +967,7 @@ src_man += files(
 	'tools/libinput-quirks.man',
 	'tools/libinput-record.man',
 	'tools/libinput-replay.man',
+	'tools/libinput-test.man',
 )
 
 foreach m : src_man

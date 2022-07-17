@@ -43,6 +43,9 @@ libinput_timer_init(struct libinput_timer *timer,
 	timer->timer_name = safe_strdup(timer_name);
 	timer->timer_func = timer_func;
 	timer->timer_func_data = timer_func_data;
+	/* at most 5 "expiry in the past" log messages per hour */
+	ratelimit_init(&libinput->timer.expiry_in_past_limit,
+		       s2us(60 * 60), 5);
 }
 
 void
@@ -89,13 +92,17 @@ libinput_timer_set_flags(struct libinput_timer *timer,
 			 uint32_t flags)
 {
 #ifndef NDEBUG
+	/* We only warn if we're more than 20ms behind */
+	const uint64_t timer_warning_limit = ms2us(20);
 	uint64_t now = libinput_now(timer->libinput);
 	if (expire < now) {
-		if ((flags & TIMER_FLAG_ALLOW_NEGATIVE) == 0)
-			log_bug_client(timer->libinput,
-				       "timer %s: scheduled expiry is in the past (-%dms), your system is too slow\n",
-				       timer->timer_name,
-				       us2ms(now - expire));
+		if ((flags & TIMER_FLAG_ALLOW_NEGATIVE) == 0 &&
+		    now - expire > timer_warning_limit)
+			log_bug_client_ratelimit(timer->libinput,
+						 &timer->libinput->timer.expiry_in_past_limit,
+						 "timer %s: scheduled expiry is in the past (-%dms), your system is too slow\n",
+						 timer->timer_name,
+						 us2ms(now - expire));
 	} else if ((expire - now) > ms2us(5000)) {
 		log_bug_libinput(timer->libinput,
 			 "timer %s: offset more than 5s, now %d expire %d\n",

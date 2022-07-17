@@ -52,51 +52,102 @@ somenamethatiswaytoolong(int a,
 - if it generates a static checker warning, it needs to be fixed or
   commented
 
-- declare variables at the top, try to keep them as local as possible.
-  Exception: if the same variable is re-used in multiple blocks, declare it
-  at the top.
-  Exception: basic loop variables, e.g. for (int i = 0; ...)
+- declare variables when they are used first and try to keep them as local as possible.
+  Exception: basic loop variables, e.g. for (int i = 0; ...) should always be
+  declared inside the loop even where multiple loops exist
 
 ```c
 int a;
-int c;
 
 if (foo) {
-        int b;
+        int b = 10;
 
-        c = get_value();
-        usevalue(c);
+        a = get_value();
+        usevalue(a, b);
 }
 
 if (bar) {
-        c = get_value();
-        useit(c);
+        a = get_value();
+        useit(a);
 }
+
+int c = a * 100;
+useit(c);
 ```
 
-- do not mix function invocations and variable definitions.
+- avoid uninitialized variables where possible, declare them late instead.
+  Note that most of libinput predates this style, try to stick with the code
+  around you if in doubt.
 
   wrong:
 
 ```c
-{
-        int a = foo();
+        int *a;
         int b = 7;
-}
+
+        ... some code ...
+
+        a = zalloc(32);
 ```
 
   right:
+
+```c
+        int b = 7;
+        ... some code ...
+
+        int *a = zalloc(32);
+```
+
+- avoid calling non-obvious functions inside declaration blocks for multiple
+  variables.
+
+  bad:
+
 ```c
 {
-        int a;
-        int b = 7;
-
-        a = foo();
+        int a = 7;
+        int b = some_complicated_function();
+        int *c = zalloc(32);
 }
 ```
 
-  There are exceptions here, e.g. `tp_libinput_context()`,
-  `litest_current_device()`
+  better:
+```c
+{
+        int a = 7;
+        int *c = zalloc(32);
+
+        int b = some_complicated_function();
+}
+```
+
+  There is a bit of gut-feeling involved with this, but the goal is to make
+  the variable values immediately recognizable.
+
+- Where statements are near-identical and repeated, try to keep them
+  identical:
+
+  bad:
+```c
+int a = get_some_value(x++);
+do_something(a);
+a = get_some_value(x++);
+do_something(a);
+a = get_some_value(x++);
+do_something(a);
+```
+  better:
+
+```c
+int a;
+a = = get_some_value(x++);
+do_something(a);
+a = get_some_value(x++);
+do_something(a);
+a = get_some_value(x++);
+do_something(a);
+```
 
 - if/else: { on the same line, no curly braces if both blocks are a single
   statement. If either if or else block are multiple statements, both must
